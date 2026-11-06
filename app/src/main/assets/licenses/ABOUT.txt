@@ -1,0 +1,31 @@
+NEC Mobile 0.2.4-alpha
+
+PC-88 core: M88 by cisc; source reference rururutan/m88.
+Changes: Android/ARM64 platform layer, C++ Z80 selection, portable compiler syntax,
+file I/O, display, PCM audio and emulated keyboard integration;
+CRTC read-port mapping, Kanji ROM loading, FM rate initialization,
+audio ring-buffer wrapping and shutdown dependency order corrected.
+Manual state files, post-load sound timing/buffer reset and C2/C3 MIDI output added.
+The accompanying source package contains the application and modified M88 source.
+M88 copyright and original license terms are retained in M88-README.md,
+M88-original-readme.txt and M88-FMGEN-readme.txt.
+
+PC-98 core: NP2kai, built from source by NEC Mobile with Android NDK r28c.
+Source revision: 1ea561cd7fd62b33f4e7b3f1c2e30fc3e6089f28.
+Change: exported real floppy insertion/ejection through diskdrv_setfdd,
+so removing a disk also updates the emulated FDD and its media-change state.
+Direct state-file result handling and a host MIDI synthesis bridge are added.
+This is not a rebuild of NP21/W rev.105.
+Upstream: https://github.com/libretro/NP2kai
+The supplied source archive includes the modified NP2kai sources and build scripts.
+NP2kai's top-level MIT license and its separate LICENSES documents accompany this app.
+Those component licenses are preserved; no single license is claimed for the full combination.
+
+libretro API header: Copyright (C) 2010-2024 The RetroArch team, MIT license.
+
+MIDI synthesis: TinySoundFont v0.9 by Bernhard Schelling, based on SFZero by Steve Folta.
+MIT license retained in TinySoundFont-MIT.txt. Upstream: https://github.com/schellingb/TinySoundFont
+No SoundFont is bundled. Users import their own SF2 resource.
+
+This local alpha build contains no game images, firmware ROMs, fonts or rhythm samples.
+Android SDK, NDK and JDK are development tools and are not included in the application.

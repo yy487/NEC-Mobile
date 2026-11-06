@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.necmobile.check">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36" />
+    <application android:label="NEC feature checks">
+        <receiver android:name="org.necmobile.AudioFocusProbe" android:exported="true">
+            <intent-filter><action android:name="org.necmobile.check.AUDIO_FOCUS" /></intent-filter>
+        </receiver>
+    </application>
+    <instrumentation android:name="org.necmobile.CoreFeatureCheck" android:targetPackage="org.necmobile" />
+</manifest>
