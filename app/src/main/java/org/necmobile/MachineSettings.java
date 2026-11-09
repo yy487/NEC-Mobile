@@ -26,7 +26,7 @@ final class MachineSettings {
     private void show(int group) {
         List<MachineOptions.Option> items=group(group);
         List<String> names=new ArrayList<>();
-        if (group==MachineOptions.MACHINE && platform==88) names.add("BASIC 模式："+new String[]{"N88-V2","N88-V1(S)","N88-V1(H)"}[game.mode]);
+        if (group==MachineOptions.MACHINE && platform==88) names.add("BASIC 模式："+MachineOptions.PC88_BOOT_MODES[game.mode]);
         for (MachineOptions.Option option : items) names.add(option.label+"："+option.display(option.value(game.machineOptions,game.mode)));
         int extras=names.size();
         if (group==MachineOptions.SOUND) { names.add("分项音量…"); if (platform==98) names.add("高级音源设置…"); }
@@ -35,7 +35,7 @@ final class MachineSettings {
                 .setItems(names.toArray(new String[0]),(dialog,index)-> {
                     int offset=group==0 && platform==88 ? 1 : 0;
                     if (offset==1 && index==0) {
-                        dialogs.get().setTitle("BASIC 模式 · 下次启动生效").setSingleChoiceItems(new String[]{"N88-V2","N88-V1(S)","N88-V1(H)"},game.mode,(picker,value)-> {
+                        dialogs.get().setTitle("BASIC 模式 · 下次启动生效").setSingleChoiceItems(MachineOptions.PC88_BOOT_MODES,game.mode,(picker,value)-> {
                             game.mode=value; picker.dismiss(); save.accept(game);
                         }).setNegativeButton("取消",null).show();
                     } else if (index<extras) choose(items.get(index-offset));
@@ -43,7 +43,7 @@ final class MachineSettings {
                     else if (group==1 && platform==98 && index==extras+1) show(MachineOptions.ADVANCED_SOUND);
                     else {
                         for (MachineOptions.Option option : MachineOptions.all(platform))
-                            if (option.group==group || (group==1 && option.group!=0)) game.machineOptions.remove(option.key);
+                            if (option.group==group || (group==1 && (option.group==MachineOptions.MIXER || option.group==MachineOptions.ADVANCED_SOUND))) game.machineOptions.remove(option.key);
                         if (group==0) game.mode=0;
                         save.accept(game);
                     }

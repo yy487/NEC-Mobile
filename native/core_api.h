@@ -7,6 +7,7 @@ struct NecHost {
     void (*audio)(const int16_t* stereo, size_t frames, unsigned rate);
     void (*message)(const char* text);
     void (*midi)(uint8_t byte);
+    void (*warning)(const char* text);
 };
 
 // Calls belong to one emulation thread. Keys use libretro/SDL 1 key numbers.
@@ -25,6 +26,7 @@ struct NecCore {
     bool (*saveState)(const char* path);
     bool (*checkState)(const char* path);
     bool (*loadState)(const char* path);
+    const char* (*diskPath)(int drive);
 };
 
 extern "C" __attribute__((visibility("default"))) const NecCore* nec_core();

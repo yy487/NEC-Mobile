@@ -8,8 +8,11 @@ NEC Mobile incorporates the components below. Their original copyright notices a
 | FMGEN | Copyright (C) cisc 1998, 2003. Original FMGEN terms | [FMGEN notice](app/src/main/assets/licenses/M88-FMGEN-readme.txt) |
 | NP2kai PC-98 core | Copyright (c) 2017 AZO and the contributors named in its source. MIT license and the component-specific terms retained in the source tree | [NP2kai license](third_party/np2kai-source/LICENSE), [component notices](third_party/np2kai-source/LICENSES/), [application notices](app/src/main/assets/licenses/) |
 | TinySoundFont v0.9 | Copyright (C) 2017–2025 Bernhard Schelling, based on SFZero by Steve Folta. MIT license | [TinySoundFont notice](app/src/main/assets/licenses/TinySoundFont-MIT.txt) |
+| FatFs R0.16 | Copyright (C) 2025, ChaN. Redistribution with the original notice | [FatFs notice](app/src/main/assets/licenses/FatFs.txt) |
 | libretro API headers | Copyright (C) 2010–2024 The RetroArch team. MIT license | [libretro notice](app/src/main/assets/licenses/libretro-header.txt) |
 
 The M88 and FMGEN terms require attribution, publication of the applicable source, and a description of modifications. Their original notices also specify conditions for commercial use. NEC Mobile's Android integration and core changes are described in the accompanying source and modification notice. [M88 modifications](third_party/m88/README.necmobile.md)
 
 NP2kai retains additional notices for CPU implementations, FM synthesis, SoftFloat, DOSBox-derived code, and other included components. These notices are provided with their source files and in the application's license directory. [Application license directory](app/src/main/assets/licenses/)
+
+NEC Mobile's NP2kai changes include real floppy control and media status, state-file results, MIDI forwarding, complete sound BIOS loading and interrupt return handling, a sound BIOS switch, and reporting the font format accepted by the loader. The modified source and preparation script accompany this release. [Preparation script](scripts/prepare_np2kai.py)

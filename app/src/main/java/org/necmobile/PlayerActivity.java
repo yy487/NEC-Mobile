@@ -10,9 +10,12 @@ import android.os.*;
 import android.view.*;
 import android.widget.*;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class PlayerActivity extends Activity implements SurfaceHolder.Callback, AudioManager.OnAudioFocusChangeListener {
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final ExecutorService stateIo = Executors.newSingleThreadExecutor();
     private final List<Button> modifiers = new ArrayList<>();
     private SurfaceView surface;
     private LinearLayout keyboard;
@@ -36,6 +39,10 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private AudioFocusRequest audioFocus;
     private boolean focusGranted, appliedPause = true;
     private boolean stateBusy;
+    private boolean startupReported, startupFailed;
+    private boolean resumeLoading, autoEnabled, autoSaving, autoPending, everRunning;
+    private String displayAspect;
+    private int lastGeometry;
     private final Runnable rebuildAudio = () -> { if (nativeStarted && !closing) Native.audioChanged(); };
     private final AudioDeviceCallback audioDevices = new AudioDeviceCallback() {
         @Override public void onAudioDevicesAdded(AudioDeviceInfo[] devices) { routeChanged(); }
@@ -50,6 +57,25 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private final Runnable statusUpdate = new Runnable() {
         @Override public void run() {
             if (closing) return;
+            int startup = Native.startState();
+            if (!startupReported && startup == 2 && !resumeLoading) {
+                if (getIntent().getBooleanExtra("continueSession", false)) {
+                    resumeLoading = stateBusy = true; applyPause();
+                    stateIo.execute(() -> {
+                        String error = null;
+                        try { stateSlots().load(StateSlots.AUTO); } catch (Exception exception) { error = exception.getMessage(); }
+                        String result = error;
+                        handler.post(() -> { stateBusy = false; if (!closing) completeStartup(result); });
+                    });
+                } else completeStartup(null);
+            }
+            if (!startupReported && startup == 3) {
+                completeStartup(Native.startError());
+            }
+            int geometry = Native.videoGeometry();
+            if (lastGeometry != geometry) { lastGeometry = geometry; screen.requestLayout(); }
+            if ("Sound BIOS ROM missing".equals(Native.takeStartupWarning()))
+                Toast.makeText(PlayerActivity.this, "未载入声卡 BIOS。需要声卡 BIOS 的游戏请先导入对应的 ROM，例如 sound86.rom 或 sound.rom，再重新启动。", Toast.LENGTH_LONG).show();
             String text = Native.status();
             if (text.equals(lastStatus)) { handler.postDelayed(this, 700); return; }
             lastStatus = text;
@@ -74,7 +100,12 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        orientationMode = getSharedPreferences("player", MODE_PRIVATE).getInt("orientation", 0);
+        String resourceWarning = getIntent().getStringExtra("resourceWarning");
+        if (resourceWarning != null && !resourceWarning.isEmpty()) Toast.makeText(this, resourceWarning, Toast.LENGTH_LONG).show();
+        String orientation = getIntent().getStringExtra("displayOrientation");
+        orientationMode = "LANDSCAPE".equals(orientation) ? 1 : "PORTRAIT".equals(orientation) ? 2 : 0;
+        displayAspect = getIntent().getStringExtra("displayAspect");
+        autoEnabled = getIntent().getBooleanExtra("resumeEnabled", false);
         applyOrientation();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
@@ -104,7 +135,15 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         screen = new FrameLayout(this) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
                 int width = View.MeasureSpec.getSize(widthSpec), height = View.MeasureSpec.getSize(heightSpec);
-                int w = Math.min(width, height * 4 / 3), h = w * 3 / 4;
+                int nativeWidth = lastGeometry >>> 16, nativeHeight = lastGeometry & 65535;
+                if (nativeWidth == 0 || nativeHeight == 0) { nativeWidth = 640; nativeHeight = 400; }
+                double aspect = "NATIVE".equals(displayAspect) || "INTEGER".equals(displayAspect) ? (double)nativeWidth / nativeHeight : 4.0 / 3;
+                int w = Math.min(width, (int)(height * aspect)), h = (int)(w / aspect);
+                if ("FILL".equals(displayAspect)) { w = width; h = height; }
+                if ("INTEGER".equals(displayAspect)) {
+                    int scale = Math.min(width / nativeWidth, height / nativeHeight);
+                    if (scale >= 1) { w = nativeWidth * scale; h = nativeHeight * scale; }
+                }
                 surface.getLayoutParams().width = w;
                 surface.getLayoutParams().height = h;
                 super.onMeasure(widthSpec, heightSpec);
@@ -173,8 +212,21 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             if (!nativeStarted) throw new IllegalStateException("已有运行中的内核");
             handler.post(statusUpdate);
         } catch (Throwable error) {
+            startupReported = startupFailed = true;
+            android.os.ResultReceiver receiver = getIntent().getParcelableExtra("startupReceiver");
+            Bundle failure = new Bundle(); failure.putString("error", error.getMessage());
+            if (receiver != null) receiver.send(RESULT_CANCELED, failure);
             dialog().setTitle("启动失败").setMessage(error.getMessage()).setPositiveButton("返回", (dialog, which) -> stop()).show();
         }
+    }
+    private void completeStartup(String error) {
+        startupReported = true; startupFailed = error != null;
+        android.os.ResultReceiver receiver = getIntent().getParcelableExtra("startupReceiver");
+        Bundle result = new Bundle();
+        if (error == null) result.putString("machineInfo", Native.machineInfo()); else result.putString("error", error);
+        if (receiver != null) receiver.send(error == null ? RESULT_OK : RESULT_CANCELED, result);
+        if (error != null) dialog().setTitle("启动未完成").setMessage(error).setPositiveButton("返回游戏库", (a, b) -> stop()).setCancelable(false).show();
+        applyPause();
     }
     private boolean mouseAllowed() { return mouseEnabled && nativeStarted && resumed && !closing && !appliedPause && !stateBusy; }
     private void clickMouse(int mask) {
@@ -287,8 +339,9 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private void applyPause() {
         cancelMouse();
         if (!nativeStarted || closing) return;
-        boolean shouldPause = userPaused || !resumed || !focusGranted || openDialogs > 0 || stateBusy;
+        boolean shouldPause = userPaused || !resumed || !focusGranted || openDialogs > 0 || stateBusy || autoSaving || !startupReported || startupFailed;
         if (shouldPause != appliedPause) { Native.pause(shouldPause); appliedPause = shouldPause; }
+        if (!shouldPause) everRunning = true;
         for (Button modifier : modifiers) { modifier.setSelected(false); modifier.setTextColor(Color.WHITE); }
     }
     private AlertDialog.Builder dialog() {
@@ -312,17 +365,19 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                 dialog().setTitle("屏幕方向")
                         .setSingleChoiceItems(new String[]{"自动旋转", "固定横屏", "固定竖屏"}, orientationMode, (picker, choice) -> {
                             orientationMode = choice;
-                            getSharedPreferences("player", MODE_PRIVATE).edit().putInt("orientation", choice).apply();
+                            saveDisplayOption("display_orientation", new String[]{"AUTO", "LANDSCAPE", "PORTRAIT"}[choice]);
                             applyOrientation(); picker.dismiss();
                         }).setNegativeButton("取消", null).show();
             }
             if (index == 5) inputSettings();
             if (index == 6) soundSettings();
             if (index == 7) dialog().setTitle("更多设置")
-                    .setItems(new String[]{"提交磁盘写入", "复位机器", "将当前画面设为封面", "恢复声音输出"}, (settings, which) -> {
+                    .setItems(new String[]{"提交磁盘写入", "复位机器", "将当前画面设为封面", "恢复声音输出", "画面比例", "实际音频输出"}, (settings, which) -> {
                         if (which == 0) Native.flush();
                         else if (which == 2) captureCover();
                         else if (which == 3) { Native.audioChanged(); requestFocus(); applyPause(); }
+                        else if (which == 4) aspectSettings();
+                        else if (which == 5) dialog().setTitle("实际音频输出").setMessage(HostAudio.route(this, Native.audioDevice()) + "\n\n" + Native.audioInfo()).setPositiveButton("关闭", null).show();
                         else dialog().setTitle("复位机器？").setMessage("尚未在游戏内保存的进度会丢失。")
                                 .setPositiveButton("复位", (a, b) -> Native.reset()).setNegativeButton("取消", null).show();
                     }).setNegativeButton("关闭", null).show();
@@ -363,14 +418,14 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             }
             grid.addView(line);
         }
-        picker[0]=dialog().setTitle("即时存档 / 读档").setView(grid).setNeutralButton("说明",(a,b)->dialog().setTitle("手动即时存档").setMessage("每款游戏有 6 个槽，保存机器运行状态和装盘组合。覆盖时旧档会保留到新档写入成功；读档失败时尝试恢复读档前的会话。\n\n不自动恢复、不回退磁盘写入。仍建议使用游戏自己的存档，避免把不同时间的磁盘进度与即时档混用。\n\n仅支持本版本、同一游戏副本与相同机器 / 音源设置。卸载或移除游戏会一并删除这些槽。")
+        picker[0]=dialog().setTitle("即时存档 / 读档").setView(grid).setNeutralButton("说明",(a,b)->dialog().setTitle("手动即时存档").setMessage("每款游戏有 6 个手动槽，另有一个独立的自动会话槽。可在系统设置中启用自动保存，从卡片继续会话。\n\n即时档恢复机器状态及装盘组合，磁盘里的写入不会回退。覆盖时旧槽保留到保存成功，读档失败时尝试恢复读档前的进度。\n\n读取时需使用同一游戏副本与保存时的机器 / 音源硬件设置。卸载或移除游戏会删除这些槽。")
                 .setPositiveButton("知道了",null).show()).setNegativeButton("返回游戏",null).show();
     }
     private void stateTask(int slot,boolean load) {
         if (stateBusy || closing) return;
         stateBusy=true; applyPause();
         AlertDialog progress=dialog().setTitle(load ? "正在读档…" : "正在保存…").setMessage("槽 "+slot).setCancelable(false).show();
-        new Thread(()-> {
+        stateIo.execute(()-> {
             String error=null;
             try { if (load) stateSlots().load(slot); else stateSlots().save(slot); }
             catch (Exception exception) { error=exception.getMessage(); }
@@ -380,9 +435,11 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                 if (isFinishing() || closing) { progress.dismiss(); return; }
                 if (result!=null) dialog().setTitle(load ? "读档未完成" : "保存未完成").setMessage(result).setPositiveButton("知道了",null).show();
                 else Toast.makeText(this,load ? "已读取槽 "+slot : "已保存到槽 "+slot,Toast.LENGTH_SHORT).show();
-                progress.dismiss(); applyPause();
+                progress.dismiss();
+                if (autoPending) { autoPending = false; saveAutomatic(); }
+                applyPause();
             });
-        },"state-slot").start();
+        });
     }
     private void soundSettings() {
         String id=getIntent().getStringExtra("gameId");
@@ -390,12 +447,22 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             try {
                 GameLibrary library=new GameLibrary(this,platform); GameLibrary.Game game=library.find(id);
                 if (game==null) throw new java.io.IOException("找不到本游戏记录");
+                Map<String,String> previous = new HashMap<>(game.machineOptions);
                 handler.post(()-> { if (closing || isFinishing()) return;
-                    new MachineSettings(this,game,platform,this::dialog,changed -> new Thread(()-> {
+                    new MachineSettings(this,game,platform,this::dialog,changed -> {
+                        Map<String,String> delta = new HashMap<>();
+                        for (MachineOptions.Option option : MachineOptions.all(platform))
+                            if (!Objects.equals(previous.get(option.key), changed.machineOptions.get(option.key))) delta.put(option.key, changed.machineOptions.get(option.key));
+                        previous.clear(); previous.putAll(changed.machineOptions);
+                        stateIo.execute(()-> {
                         String message="音源设置已保存，下次启动生效";
-                        try { library.save(changed); } catch (Exception error) { message=error.getMessage(); }
+                        try { library.updateGame(id, current -> {
+                            for (Map.Entry<String,String> setting : delta.entrySet())
+                                if (setting.getValue() == null) current.machineOptions.remove(setting.getKey());
+                                else current.machineOptions.put(setting.getKey(), setting.getValue());
+                        }); } catch (Exception error) { message=error.getMessage(); }
                         String result=message; handler.post(()-> { if (!closing) Toast.makeText(this,result,Toast.LENGTH_LONG).show(); });
-                    },"save-machine-settings").start()).sound();
+                    }); }).sound();
                 });
             } catch (Exception error) { handler.post(()-> { if (!closing) Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show(); }); }
         },"read-machine-settings").start();
@@ -430,6 +497,34 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         if (orientationMode < 0 || orientationMode > 2) orientationMode = 0;
         setRequestedOrientation(orientationMode == 1 ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE :
                 orientationMode == 2 ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+    }
+    private void saveDisplayOption(String key, String value) {
+        stateIo.execute(() -> {
+            try { new GameLibrary(this, platform).updateGame(getIntent().getStringExtra("gameId"), game -> game.machineOptions.put(key, value)); }
+            catch (Exception error) { handler.post(() -> { if (!closing) Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show(); }); }
+        });
+    }
+    private void aspectSettings() {
+        String[] values = {"4:3", "NATIVE", "FILL", "INTEGER"};
+        dialog().setTitle("画面比例").setSingleChoiceItems(new String[]{"4:3", "原始像素比例", "填满屏幕", "整数缩放"}, Arrays.asList(values).indexOf(displayAspect), (picker, choice) -> {
+            displayAspect = values[choice]; saveDisplayOption("display_aspect", displayAspect); screen.requestLayout(); picker.dismiss();
+        }).setNegativeButton("取消", null).show();
+    }
+    private void saveAutomatic() {
+        if (!autoEnabled || !everRunning || closing || startupFailed || autoSaving) return;
+        if (stateBusy) { autoPending = true; return; }
+        autoSaving = true; applyPause();
+        stateIo.execute(() -> {
+            String error = null;
+            try { stateSlots().save(StateSlots.AUTO); } catch (Exception exception) { error = exception.getMessage(); }
+            String result = error;
+            handler.post(() -> {
+                autoSaving = false;
+                if (closing) return;
+                if (result != null) Toast.makeText(this, "会话保存未完成：" + result, Toast.LENGTH_LONG).show();
+                applyPause();
+            });
+        });
     }
     private void layoutPlayer() {
         boolean landscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
@@ -494,18 +589,24 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void confirmExit() {
         dialog().setTitle("退出游戏？")
-                .setMessage("请先使用游戏内存档或手动即时存档。退出时会提交磁盘写入，下次冷启动后可从菜单读取即时档。")
+                .setMessage(autoEnabled ? "退出时会保存本次会话并提交磁盘写入，下次可从游戏卡片继续。" : "退出时会提交磁盘写入。需要保留当前机器进度时，请先使用游戏内存档或手动即时存档。")
                 .setPositiveButton("退出", (dialog, which) -> stop()).setNegativeButton("继续游玩", null).show();
     }
     private void stop() {
         if (closing) return;
         cancelMouse();
         closing = true; handler.removeCallbacks(statusUpdate);
+        if (nativeStarted) Native.pause(true);
         Toast.makeText(this, "正在退出并提交磁盘写入…", Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
+        stateIo.execute(() -> {
+            String error = null;
+            if (nativeStarted && autoEnabled && everRunning && !startupFailed) {
+                try { stateSlots().save(StateSlots.AUTO); } catch (Exception exception) { error = exception.getMessage(); }
+            }
             if (nativeStarted) Native.stop();
-            runOnUiThread(() -> { setResult(RESULT_OK); finish(); });
-        }, "core-stop").start();
+            String result = error;
+            runOnUiThread(() -> { Intent data = new Intent(); if (result != null) data.putExtra("sessionError", result); setResult(RESULT_OK, data); finish(); });
+        });
     }
     @Override public void onBackPressed() { confirmExit(); }
     @Override protected void onResume() {
@@ -522,6 +623,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     @Override protected void onPause() {
         resumed = false; focusGranted = false; applyPause();
+        saveAutomatic();
         if (audio != null) audio.abandonAudioFocusRequest(audioFocus);
         super.onPause();
     }
@@ -537,10 +639,18 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         if (audio != null) audio.unregisterAudioDeviceCallback(audioDevices);
         unregisterReceiver(noisyAudio);
         handler.removeCallbacksAndMessages(null);
-        if (nativeStarted && !closing) Native.stop();
+        boolean unexpected = !closing;
+        closing = true;
+        if (unexpected && nativeStarted) stateIo.execute(() -> {
+            Native.pause(true);
+            if (autoEnabled && everRunning && !startupFailed) try { stateSlots().save(StateSlots.AUTO); } catch (Exception ignored) { }
+            Native.stop();
+            if (isFinishing()) android.os.Process.killProcess(android.os.Process.myPid());
+        });
+        stateIo.shutdown();
         super.onDestroy();
         // Each player lives in its own process so native singleton state cannot leak into the next boot.
-        if (isFinishing()) android.os.Process.killProcess(android.os.Process.myPid());
+        if (!unexpected && isFinishing()) android.os.Process.killProcess(android.os.Process.myPid());
     }
     private int keyCode(KeyEvent event) {
         int code = event.getKeyCode();

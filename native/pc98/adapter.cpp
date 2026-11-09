@@ -28,6 +28,11 @@ static void* library;
 static bool (*setFloppy)(unsigned, const char*);
 static bool (*saveMachine)(const char*), (*checkMachine)(const char*), (*loadMachine)(const char*);
 static void (*configureMidi)(bool);
+static void (*configureSoundBios)(bool);
+static const char* (*soundRomName)();
+static const char* (*fontResource)();
+static void (*completeMedia)();
+static const char* (*floppyPath)(unsigned);
 static NecHost host{};
 static std::string systemDirectory, saveDirectory;
 static std::map<std::string, std::string> options;
@@ -188,7 +193,9 @@ static void closeCore() {
     }
     library = nullptr;
     setFloppy = nullptr;
-    saveMachine = checkMachine = loadMachine = nullptr; configureMidi = nullptr;
+    saveMachine = checkMachine = loadMachine = nullptr; configureMidi = nullptr; configureSoundBios = nullptr; soundRomName = nullptr;
+    completeMedia = nullptr; floppyPath = nullptr;
+    fontResource = nullptr;
     loaded = initialized = false;
     disks = {};
     media.clear();
@@ -227,8 +234,17 @@ static bool openCore(const char* directory, const char* disk, const char* second
     checkMachine = reinterpret_cast<decltype(checkMachine)>(dlsym(library,"necmobile_check_state"));
     loadMachine = reinterpret_cast<decltype(loadMachine)>(dlsym(library,"necmobile_load_state"));
     configureMidi = reinterpret_cast<decltype(configureMidi)>(dlsym(library,"necmobile_configure_midi"));
-    if (!saveMachine || !checkMachine || !loadMachine || !configureMidi) { host.message("PC-98 state/MIDI bridge missing"); closeCore(); return false; }
+    configureSoundBios = reinterpret_cast<decltype(configureSoundBios)>(dlsym(library,"necmobile_configure_sound_bios"));
+    soundRomName = reinterpret_cast<decltype(soundRomName)>(dlsym(library,"necmobile_sound_rom"));
+    fontResource = reinterpret_cast<decltype(fontResource)>(dlsym(library,"necmobile_font_resource"));
+    completeMedia = reinterpret_cast<decltype(completeMedia)>(dlsym(library,"necmobile_complete_media"));
+    floppyPath = reinterpret_cast<decltype(floppyPath)>(dlsym(library,"necmobile_floppy_path"));
+    if (!saveMachine || !checkMachine || !loadMachine || !configureMidi || !configureSoundBios || !soundRomName || !fontResource || !completeMedia || !floppyPath) {
+        host.message("PC-98 core bridge missing"); closeCore(); return false;
+    }
     configureMidi(midiEnabled);
+    bool soundBiosEnabled = machineText(readMachineConfig(directory),"pc98_sound_bios","ON")=="ON";
+    configureSoundBios(soundBiosEnabled);
     p_retro_set_environment(environment);
     p_retro_set_video_refresh(video);
     p_retro_set_audio_sample(audioSample);
@@ -252,6 +268,12 @@ static bool openCore(const char* directory, const char* disk, const char* second
     if (*secondDisk) media.insert(secondDisk);
     // NP2kai creates its machine on the first run call, before AV geometry is valid.
     p_retro_run();
+    completeMedia();
+    host.message((std::string("PC-98 font loaded: ") + fontResource()).c_str());
+    const char* rom = soundRomName();
+    host.message((std::string("PC-98 sound BIOS loaded: ") + (rom && *rom ? rom : soundBiosEnabled ? "none" : "disabled")).c_str());
+    if (soundBiosEnabled && (!rom || !*rom) && (options["np2kai_SNDboard"].find("86") != std::string::npos || options["np2kai_SNDboard"].find("26K") != std::string::npos) && host.warning)
+        host.warning("Sound BIOS ROM missing");
     retro_system_av_info info{};
     p_retro_get_system_av_info(&info);
     refresh = info.timing.fps > 1 ? info.timing.fps : 60;
@@ -269,17 +291,27 @@ static void mouse(int dx, int dy, unsigned buttons) {
 static bool mount(int drive, const char* path, int index) {
     if (drive < 0 || drive > 1 || index != 0 || !setFloppy) return false;
     if (!flush()) return false;
+    const char* old = floppyPath(drive);
+    std::string previous = old ? old : "";
     if (!setFloppy(drive, *path ? path : nullptr)) return false;
+    completeMedia();
+    const char* actual = floppyPath(drive);
+    if (std::string(actual ? actual : "") != path) {
+        setFloppy(drive, previous.empty() ? nullptr : previous.c_str());
+        completeMedia();
+        return false;
+    }
     if (*path) media.insert(path);
     return true;
 }
 static void reset() { keys.fill(false); p_retro_reset(); }
 static double fps() { return refresh; }
 static bool enableMouse(bool) { return true; }
+static const char* diskPath(int drive) { return floppyPath && drive >= 0 && drive < 2 ? floppyPath(drive) : ""; }
 static bool saveState(const char* path) { return saveMachine && saveMachine(path); }
 static bool checkState(const char* path) { return checkMachine && checkMachine(path); }
 static bool loadState(const char* path) { if (!loadMachine || !loadMachine(path)) return false; keys.fill(false); mouseX=mouseY=polledX=polledY=0; mouseButtons=0; return true; }
 extern "C" const NecCore* nec_core() {
-    static const NecCore api{"NP2kai / PC-98", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState};
+    static const NecCore api{"NP2kai / PC-98", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, diskPath};
     return &api;
 }

@@ -6,13 +6,14 @@ import zipfile
 root = Path(__file__).resolve().parents[1]
 release = root / 'release'
 release.mkdir(exist_ok=True)
-target = release / 'NEC-Mobile-0.2.4-alpha-sources.zip'
+version = dict(line.split('=', 1) for line in (root / 'version.properties').read_text(encoding='utf-8').splitlines() if '=' in line)['versionName']
+target = release / f'NEC-Mobile-{version}-sources.zip'
 staging = target.with_suffix('.zip.part')
 files = []
 for folder in ('app', 'native', 'scripts', 'tests',
                'third_party/m88/src/common', 'third_party/m88/src/devices',
                'third_party/m88/src/if', 'third_party/m88/src/pc88',
-               'third_party/np2kai-source', 'third_party/tinysoundfont'):
+               'third_party/np2kai-source', 'third_party/tinysoundfont', 'third_party/fatfs', 'gradle'):
     base = root / folder
     for file in sorted(base.rglob('*')):
         relative = file.relative_to(root)
@@ -24,13 +25,14 @@ for folder in ('app', 'native', 'scripts', 'tests',
             continue
         if relative.parent.as_posix() == 'third_party/m88/src/pc88' and file.name in ('ioview.cpp', 'memview.cpp'):
             continue
-        if file.suffix.lower() in ('.rom', '.wav', '.fnt', '.sf2', '.sf3', '.dls',
+        bundled_firmware = relative.is_relative_to('app/src/main/assets/firmware') and file.suffix.lower() in ('.rom', '.fnt')
+        if not bundled_firmware and file.suffix.lower() in ('.rom', '.wav', '.fnt', '.sf2', '.sf3', '.dls',
                                   '.d88', '.88d', '.fdi', '.hdi', '.nhd', '.hdd', '.thd', '.xdf', '.hdm',
                                   '.bin', '.exe', '.dll', '.pdb', '.obj', '.apk', '.idsig', '.jks', '.keystore', '.zip'):
             continue
         files.append((file, relative))
-for name in ('README.md', 'README.en.md', 'README.ja.md', 'LICENSE.md', '.gitignore', '.gitattributes',
-             'settings.gradle.kts', 'build.gradle.kts',
+for name in ('README.md', 'README.en.md', 'README.ja.md', 'CHANGELOG.md', 'LICENSE.md', '.gitignore', '.gitattributes',
+             'settings.gradle.kts', 'build.gradle.kts', 'gradle.properties', 'version.properties', 'gradlew', 'gradlew.bat',
              'third_party/m88/README.md', 'third_party/m88/readme.txt', 'third_party/m88/README.necmobile.md'):
     file = root / name
     if file.exists():

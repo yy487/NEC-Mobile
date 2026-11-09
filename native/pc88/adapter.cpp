@@ -172,22 +172,36 @@ static std::unique_ptr<AndroidKeyboard> keyboard;
 static std::unique_ptr<PC8801::Sound> sound;
 static double sampleRemainder;
 static bool initialized;
-static int requestedMode;
+using BasicMode = PC8801::Config::BASICMode;
+static constexpr BasicMode basicModes[] = {
+    PC8801::Config::N88V2, PC8801::Config::N88V1, PC8801::Config::N88V1H,
+    PC8801::Config::N80, PC8801::Config::N802, PC8801::Config::N80V2,
+};
+static BasicMode requestedMode;
 static PC8801::Config initialConfig;
 static MachineConfig machineConfig;
 
 void AndroidInitialConfig(PC88* pc) {
     initialConfig = {};
     auto& config = initialConfig;
-    config.basicmode = requestedMode == 1 ? PC8801::Config::N88V1 : requestedMode == 2 ? PC8801::Config::N88V1H : PC8801::Config::N88V2;
+    config.basicmode = requestedMode;
     config.clock = machineInt(machineConfig,"m88_clock",40,40,80);
     config.speed = 1000;
     config.mainsubratio = config.clock >= 80 ? 2 : 1;
     config.cpumode = PC8801::Config::msauto;
-    config.dipsw = 1829;
-    config.refreshtiming = 1;
+    std::string ratio = machineText(machineConfig,"m88_cpu_ratio","AUTO");
+    if (ratio == "1:1") config.cpumode = PC8801::Config::ms11;
+    else if (ratio == "2:1") config.cpumode = PC8801::Config::ms21;
+    config.dipsw = machineInt(machineConfig,"m88_dipsw",1829,0,4095);
+    config.refreshtiming = machineInt(machineConfig,"m88_refreshtiming",1,0,3);
     config.opnclock = 8000000;
     config.flags = PC8801::Config::fullline | PC8801::Config::precisemixing | PC8801::Config::enableopna;
+    if (machineText(machineConfig,"m88_sub_always","ON")=="OFF") config.flags |= PC8801::Config::subcpucontrol;
+    if (machineText(machineConfig,"m88_cpu_wait","OFF")=="ON") config.flags |= PC8801::Config::enablewait;
+    if (machineText(machineConfig,"m88_pcg","OFF")=="ON") config.flags |= PC8801::Config::enablepcg;
+    if (machineText(machineConfig,"m88_monitor","24K")=="15K") config.flags |= PC8801::Config::fv15k;
+    if (machineText(machineConfig,"m88_fullline","ON")=="OFF") config.flags &= ~PC8801::Config::fullline;
+    if (machineText(machineConfig,"m88_digital_palette","OFF")=="ON") config.flags |= PC8801::Config::digitalpalette;
     if (machineText(machineConfig,"m88_board","OPNA")=="OPN") config.flags &= ~PC8801::Config::enableopna;
     config.erambanks=machineInt(machineConfig,"m88_erambanks",0,0,32);
     config.volfm=machineInt(machineConfig,"m88_fm",0,-40,20);
@@ -195,6 +209,7 @@ void AndroidInitialConfig(PC88* pc) {
     config.voladpcm=machineInt(machineConfig,"m88_adpcm",0,-40,20);
     config.volrhythm=machineInt(machineConfig,"m88_rhythm",0,-40,20);
     config.flag2 = PC8801::Config::usefmclock;
+    if (machineText(machineConfig,"m88_fdd_wait","ON")=="OFF") config.flag2 |= PC8801::Config::fddnowait;
     config.lpffc = 9000;
     config.lpforder = 4;
     pc->ApplyConfig(&config);
@@ -216,12 +231,31 @@ static void closeCore() {
     disks.reset();
     draw.reset();
 }
+static bool hasRom(const char* name, int size) {
+    FileIO file(name, FileIO::readonly);
+    return file.Seek(0, FileIO::end) && file.Tellp() >= size;
+}
 static bool openCore(const char* directory, const char* disk, const char* secondDisk, int mode, NecHost host) {
     closeCore();
     m88host = host;
-    requestedMode = mode;
+    requestedMode = mode >= 0 && size_t(mode) < std::size(basicModes) ? basicModes[mode] : basicModes[0];
     machineConfig=readMachineConfig(directory);
     if (chdir(directory)) { host.message("PC-88 directory cannot be opened"); return false; }
+    const char* missingRom = nullptr;
+    switch (requestedMode) {
+        case PC8801::Config::N80:
+            if (!hasRom("pc88.rom", 0x1c000) && !hasRom("n80.rom", 0x8000))
+                missingRom = "N mode requires n80.rom or a complete combined PC88 ROM";
+            break;
+        case PC8801::Config::N802:
+            if (!hasRom("n80_2.rom", 0x8000)) missingRom = "N80 mode requires n80_2.rom";
+            break;
+        case PC8801::Config::N80V2:
+            if (!hasRom("n80_3.rom", 0xa000)) missingRom = "N80-V2 mode requires n80_3.rom";
+            break;
+        default: break;
+    }
+    if (missingRom) { host.message(missingRom); return false; }
     draw = std::make_unique<AndroidDraw>();
     disks = std::make_unique<DiskManager>();
     tape = std::make_unique<TapeManager>();
@@ -247,7 +281,9 @@ static bool openCore(const char* directory, const char* disk, const char* second
     machine->Reset();
     sampleRemainder = 0;
     std::string description="PC-88 config: board="+machineText(machineConfig,"m88_board","OPNA")+
-        ", BEEP="+machineText(machineConfig,"m88_beep","ON")+", FM="+std::to_string(config.volfm)+", clock="+std::to_string(config.clock);
+        ", BEEP="+machineText(machineConfig,"m88_beep","ON")+", FM="+std::to_string(config.volfm)+", clock="+std::to_string(config.clock)+
+        ", CPU ratio="+machineText(machineConfig,"m88_cpu_ratio","AUTO")+", DIP="+std::to_string(config.dipsw)+
+        ", flags="+std::to_string(config.flags)+", flag2="+std::to_string(config.flag2);
     host.message(description.c_str());
     return true;
 }

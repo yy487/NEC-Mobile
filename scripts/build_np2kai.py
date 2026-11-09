@@ -3,9 +3,13 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+import argparse
 
 root = Path(__file__).resolve().parents[1]
-ndk = root / '.cache/android-sdk/ndk/28.2.13676358'
+parser = argparse.ArgumentParser()
+parser.add_argument('--ndk', type=Path, default=root / '.cache/android-sdk/ndk/28.2.13676358')
+args = parser.parse_args()
+ndk = args.ndk
 source = root / 'third_party/np2kai-source'
 subprocess.run([sys.executable, '-X', 'utf8', root / 'scripts/prepare_np2kai.py'], check=True)
 command = [ndk / ('ndk-build.cmd' if os.name == 'nt' else 'ndk-build'),

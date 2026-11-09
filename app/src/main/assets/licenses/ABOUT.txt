@@ -1,4 +1,4 @@
-NEC Mobile 0.2.4-alpha
+NEC Mobile
 
 PC-88 core: M88 by cisc; source reference rururutan/m88.
 Changes: Android/ARM64 platform layer, C++ Z80 selection, portable compiler syntax,
@@ -15,11 +15,10 @@ Source revision: 1ea561cd7fd62b33f4e7b3f1c2e30fc3e6089f28.
 Change: exported real floppy insertion/ejection through diskdrv_setfdd,
 so removing a disk also updates the emulated FDD and its media-change state.
 Direct state-file result handling and a host MIDI synthesis bridge are added.
-This is not a rebuild of NP21/W rev.105.
 Upstream: https://github.com/libretro/NP2kai
 The supplied source archive includes the modified NP2kai sources and build scripts.
 NP2kai's top-level MIT license and its separate LICENSES documents accompany this app.
-Those component licenses are preserved; no single license is claimed for the full combination.
+The original component licenses are preserved.
 
 libretro API header: Copyright (C) 2010-2024 The RetroArch team, MIT license.
 
@@ -27,5 +26,10 @@ MIDI synthesis: TinySoundFont v0.9 by Bernhard Schelling, based on SFZero by Ste
 MIT license retained in TinySoundFont-MIT.txt. Upstream: https://github.com/schellingb/TinySoundFont
 No SoundFont is bundled. Users import their own SF2 resource.
 
-This local alpha build contains no game images, firmware ROMs, fonts or rhythm samples.
+DOS disk import: FatFs R0.16 by ChaN, copyright (C) 2025.
+Original notice retained in FatFs.txt. Upstream: https://elm-chan.org/fsw/ff/
+The Android host adds bounded PC-98 HDI partition I/O and preserves PC-98 boot-sector bytes.
+
+This build includes default PC-88 firmware and fonts, and PC-98 font and sound BIOS resources
+from the firmware archives supplied for this build. Game images are imported separately.
 Android SDK, NDK and JDK are development tools and are not included in the application.

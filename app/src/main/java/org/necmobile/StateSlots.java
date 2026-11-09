@@ -8,11 +8,46 @@ import java.util.*;
 
 final class StateSlots {
     static final int COUNT=6;
+    static final int AUTO=0;
     private final File root;
     StateSlots(File gameDirectory) { root=new File(gameDirectory,"states"); root.mkdirs(); }
     private AtomicFile pointer(int slot) {
-        if (slot<1 || slot>COUNT) throw new IllegalArgumentException("无效存档槽");
-        return new AtomicFile(new File(root,"slot-"+slot+".txt"));
+        if (slot<0 || slot>COUNT) throw new IllegalArgumentException("无效存档槽");
+        return new AtomicFile(new File(root,slot == AUTO ? "auto.txt" : "slot-"+slot+".txt"));
+    }
+    boolean hasAuto() { return new File(root,"auto.txt").isFile() || new File(root,"auto.txt.bak").isFile(); }
+    private static long number(DataInputStream input) throws IOException { return Integer.toUnsignedLong(Integer.reverseBytes(input.readInt())); }
+    private static String text(DataInputStream input, int limit) throws IOException {
+        long size = number(input); if (size > limit) throw new IOException("会话记录损坏");
+        byte[] bytes = new byte[(int)size]; input.readFully(bytes);
+        String value = new String(bytes, StandardCharsets.UTF_8);
+        if (value.indexOf('\0') >= 0) throw new IOException("会话记录损坏");
+        return value;
+    }
+    private LaunchMedia.Ref media(GameLibrary.Game game, String path, int index) throws IOException {
+        if (path.isEmpty()) return null;
+        for (Library.Disk disk : game.media) if (disk.file.getCanonicalPath().equals(new File(path).getCanonicalPath()))
+            return new LaunchMedia.Ref(disk.file.getName(), index);
+        throw new IOException("上次会话使用的磁盘已移除，请恢复文件或正常启动游戏");
+    }
+    LaunchMedia sessionMedia(GameLibrary.Game game, int platform) throws Exception {
+        File folder = folder(AUTO); if (folder == null) throw new IOException("还没有可继续的会话，请先启动游戏");
+        try (DataInputStream input = new DataInputStream(new FileInputStream(new File(folder, "host.bin")))) {
+            byte[] magic = new byte[11]; input.readFully(magic);
+            if (!new String(magic, StandardCharsets.US_ASCII).equals("NECSTATE024") || number(input) != platform)
+                throw new IOException("会话不完整或平台不匹配");
+            long mode = number(input);
+            if (mode != game.mode) throw new IOException("请先恢复保存会话时的 BASIC / 机型设置");
+            if (!text(input, 4096).equals(root.getParentFile().getAbsolutePath())) throw new IOException("会话不属于当前游戏副本");
+            String configuration = text(input, 16384);
+            String first = text(input, 4096); int firstIndex = Math.toIntExact(number(input));
+            String second = text(input, 4096); int secondIndex = Math.toIntExact(number(input));
+            if (input.read() != -1) throw new IOException("会话记录损坏");
+            LaunchMedia.Ref hard = null;
+            for (String line : configuration.split("\n")) if (line.startsWith("host_hard_disk=")) hard = media(game, line.substring(15), 0);
+            LaunchMedia result = new LaunchMedia(media(game, first, firstIndex), media(game, second, secondIndex), hard);
+            result.validate(game, platform, true); return result;
+        }
     }
     File folder(int slot) throws IOException {
         String value;

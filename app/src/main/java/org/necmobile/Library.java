@@ -41,6 +41,7 @@ final class Library {
         roms.mkdirs(); disks.mkdirs();
     }
     String name(Uri uri) {
+        if ("file".equals(uri.getScheme())) return new File(uri.getPath()).getName();
         try (Cursor cursor = context.getContentResolver().query(uri,
                 new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) return cursor.getString(0);
@@ -114,11 +115,17 @@ final class Library {
     private boolean romName(String name) {
         return name.matches("[a-z0-9][a-z0-9_.-]{0,95}") && Arrays.asList("rom", "fnt", "bmp", "wav", "bin").contains(extension(name));
     }
+    static final int SOUND_BIOS_BYTES = 0x4000;
+    static boolean soundBiosName(String name) { return name.matches("sound[0-9a-z]*\\.rom"); }
+
     private void rom(InputStream input, String name) throws Exception {
         AtomicFile storage = new AtomicFile(new File(roms, name));
         FileOutputStream output = storage.startWrite();
         try {
-            if (copy(input, output, 16 * 1024 * 1024) == 0) throw new IOException("ROM 文件为空");
+            long bytes = copy(input, output, 16 * 1024 * 1024);
+            if (bytes == 0) throw new IOException("ROM 文件为空");
+            if (roms != root && soundBiosName(name) && bytes != SOUND_BIOS_BYTES)
+                throw new IOException(name + " 的大小必须为 16 KB");
             storage.finishWrite(output);
         } catch (Exception error) { storage.failWrite(output); throw error; }
     }

@@ -12,7 +12,7 @@ inline MachineConfig readMachineConfig(const char* directory) {
     std::string line;
     unsigned count=0;
     while (std::getline(file,line)) {
-        if (++count>64 || line.size()>256) throw std::runtime_error("Machine configuration is too large");
+        if (++count>128 || line.size()>256) throw std::runtime_error("Machine configuration is too large");
         if (!line.empty() && line.back()=='\r') line.pop_back();
         auto split=line.find('=');
         if (line.empty()) continue;

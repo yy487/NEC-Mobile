@@ -16,6 +16,8 @@ __pycache__/
 *.zip
 *.rom
 *.fnt
+!/app/src/main/assets/firmware/**/*.rom
+!/app/src/main/assets/firmware/**/*.fnt
 *.sf2
 *.sf3
 *.dls
@@ -38,6 +40,7 @@ __pycache__/
 !/third_party/m88/
 !/third_party/np2kai-source/
 !/third_party/tinysoundfont/
+!/third_party/fatfs/
 /third_party/m88/*
 !/third_party/m88/README.md
 !/third_party/m88/readme.txt

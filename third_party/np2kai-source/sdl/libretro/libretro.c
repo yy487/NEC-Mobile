@@ -1931,7 +1931,31 @@ RETRO_API bool necmobile_set_floppy(unsigned drive, const char* path)
 }
 
 /* NEC Mobile state and MIDI bridge. */
+#include <sound/soundrom.h>
+#include <diskimage/fddfile.h>
+RETRO_API void necmobile_complete_media(void)
+{
+   unsigned tick;
+   for (tick = 0; tick < 100; tick++) diskdrv_callback();
+}
+RETRO_API const char* necmobile_floppy_path(unsigned drive)
+{
+   UINT type;
+   int readonly;
+   if (drive >= 2) return NULL;
+   return fdd_getfileex(drive, &type, &readonly);
+}
+RETRO_API const char* necmobile_sound_rom(void)
+{
+   return soundrom.address ? soundrom.name : NULL;
+}
 int necmobile_midi_enabled = 0;
+int necmobile_sound_bios_enabled = 1;
+int necmobile_font_kind = 0;
+RETRO_API const char* necmobile_font_resource(void) {
+   return necmobile_font_kind == 1 ? "FONT.BMP" : necmobile_font_kind == 2 ? "FONT.ROM" : "internal fallback";
+}
+RETRO_API void necmobile_configure_sound_bios(bool enabled) { necmobile_sound_bios_enabled = enabled; }
 RETRO_API void necmobile_configure_midi(bool enabled) { necmobile_midi_enabled = enabled; }
 RETRO_API bool necmobile_save_state(const char* path)
 {

@@ -4,10 +4,10 @@
 
 在 Android 上运行 PC-88 和 PC-98 游戏。项目将 M88 的 PC-88 内核与 NP2kai 的 PC-98 内核集成到同一个应用，分别管理两种平台的游戏、资源和机器配置。
 
-当前版本 **0.2.4-alpha**，适用于 **Android 8.0 及以上、ARM64** 设备。
+当前版本 **0.26.1**，适用于 **Android 8.0 及以上、ARM64** 设备。
 
-- [下载 APK](https://github.com/yy487/NEC-Mobile/releases/download/v0.2.4-alpha/NEC-Mobile-0.2.4-alpha-arm64.apk)
-- [下载源码包](https://github.com/yy487/NEC-Mobile/releases/download/v0.2.4-alpha/NEC-Mobile-0.2.4-alpha-sources.zip)
+- Android 安装包 `NEC-Mobile-0.26.1-arm64.apk`
+- 源码包 `NEC-Mobile-0.26.1-sources.zip`
 
 ## 功能
 
@@ -17,13 +17,16 @@
 - 按游戏保存机型、CPU、内存、声卡及分项音量。
 - 每款游戏 6 个手动即时存档槽。
 - SF2 MIDI 合成，以及前后台和音频设备切换后的声音恢复。
+- Compose / Material 3 平台入口、独立配置页与启动盘位弹层。
+- 独立自动会话槽、运行速度、画面比例、手机采样率与缓冲设置。
+- PC-98 DOS 目录导入为专用 HDI，支持 FREECG98.BMP 字库。
 
 ## 开始使用
 
 1. 安装 APK，打开应用并选择 **PC-88** 或 **PC-98**。
-2. 准备游戏所需的系统 ROM 和字库，从 **设置 → 导入系统 ROM / 字库** 导入。配套资源也可与磁盘放在同一游戏文件夹或 ZIP 中。
+2. 应用会自动准备默认启动固件和字库。游戏如需其他固件，可从 **设置 → 导入系统 ROM / 字库** 导入，也可与磁盘放在同一游戏文件夹或 ZIP 中。
 3. 点击 **添加游戏**，选择单款游戏的文件夹或 ZIP，将整套磁盘一起导入。
-4. 点击游戏卡片启动。需要调整启动盘时，进入 **管理 → 启动磁盘**，选择第一张盘和第二张盘。
+4. 点击游戏卡片，在弹层中确认软驱 A、B 或独立硬盘。勾选 **记住这次装盘** 才会改变默认盘位；也可从 **游戏管理 → 默认盘位** 保存。
 
 应用使用导入后的磁盘副本保存游戏进度。再次点击卡片时，按已记住的启动盘组合启动机器。
 
@@ -70,12 +73,24 @@
 
 需要保留游戏内存档时，从 **管理 → 管理磁盘文件 → 导出磁盘副本** 导出对应磁盘。移除游戏或卸载应用会删除应用内磁盘和即时档。
 
+在 **游戏管理 → 系统设置** 中启用自动保存后，切后台和正常退出会写入独立会话槽。用卡片的 **继续会话** 恢复，六个手动槽保持独立。恢复失败时会说明原因，可选择正常启动。
+
 ## 机器、音源与 MIDI
 
-从游戏卡片的 **管理 → 机器设置 / 音源设置** 调整配置，修改在下次启动生效。
+从游戏卡片的 **游戏管理 → 系统设置** 调整配置，修改在下次启动生效。
 
-- **PC-88** 提供 N88 BASIC 模式、4/8 MHz、扩展内存、OPN/OPNA 和 FM、SSG、ADPCM、节奏音量。
+- **PC-88** 提供 N88-V1(S)、N88-V1(H)、N88-V2、N、N80、N80-V2 模式、4/8 MHz、扩展内存、OPN/OPNA 和 FM、SSG、ADPCM、节奏音量。
 - **PC-98** 提供 VX/VM/PC-286、CPU/FPU 档位、内存，以及 86、26K、118、SB16 等声卡及组合，支持 FM、SSG、ADPCM、PCM、节奏和 BEEP 音量。
+
+PC-88 增加主副 CPU 比例、副 CPU 调度、CPU / 软驱等待、DIP-SW、PCG 和显示时序。PC-98 增加声卡 BIOS、GDC、扫描线、调色板和 LCD 设置。
+
+模拟运行速度提供 50%、100%、150%、200%，音高随速度变化；全速模式静音。画面支持 4:3、原始比例、填满与整数缩放，方向按游戏保存。整数缩放在屏幕放不下原始尺寸时按比例缩小。
+
+从平台的 **设置 → 手机音频输出** 选择应用共用的采样率与缓冲，下次启动生效。播放器的 **更多设置 → 实际音频输出** 显示当前路由及 AAudio 实际参数；内核 PCM 与输出采样率不同时自动重采样。
+
+从 **游戏管理 → 字库设置 · FREECG98.BMP** 选择或导入 PC-98 字库。导入后立即选用，下次启动生效。优先级为手选、游戏包、全局导入、内置；同一来源优先使用 FREECG98.BMP、FONT.BMP，再使用 FONT.ROM。2048×2048、1 位未压缩 BMP 会生成内核使用的副本，原文件保留。系统设置的上次启动信息显示实际加载格式。
+
+若文件夹内的日文磁盘名称在解压时被按 GBK 错译，可用 **游戏管理 → 修复磁盘名称编码** 预览恢复结果并应用。操作只修改显示名称，无需重新导入磁盘。
 
 ### MIDI
 
@@ -83,7 +98,15 @@
 2. 在该游戏的 **音源设置** 中启用 MIDI。
 3. 启动游戏，在游戏自身的设置中选择 MIDI 音乐。
 
-MIDI 通过 TinySoundFont 使用 SF2 合成 General MIDI 音乐。PC-98 使用 MPU-98，默认端口 E0D0/E0D2、IRQ 6。PC-88 使用 C2/C3 串行接口。游戏镜像、ROM、字库和 SF2 音色库由使用者自行准备。
+MIDI 通过 TinySoundFont 使用 SF2 合成 General MIDI 音乐。PC-98 使用 MPU-98，默认端口 E0D0/E0D2、IRQ 6。PC-88 使用 C2/C3 串行接口。游戏镜像和 SF2 音色库由使用者自行准备。
+
+## PC-98 DOS 游戏目录
+
+1. 在 PC-98 库选择 **添加游戏 → DOS 游戏目录 / DOS 游戏 ZIP**，导入完整目录。
+2. 导入一份已有 DOS 系统的 HDI 模板，选择 BAT / EXE / COM 入口、工作目录与模板启动后的 DOS 盘符。
+3. 保留模板的驱动初始化命令，删除旧游戏的自启动命令，再点 **建立硬盘**。
+
+每款游戏使用独立的可写 HDI。文件名需符合代码页 932 的 DOS 8.3 规则；不兼容名称、重名与空间不足会中止导入。模板支持 PC-98 FAT12 / FAT16 分区，必须具备 IO.SYS、MSDOS.SYS 和 COMMAND.COM。应用不提供 DOS 系统盘。可从磁盘管理导出游戏 HDI，备份游戏内存档。
 
 ## 构建
 
@@ -95,9 +118,9 @@ python -X utf8 scripts/extract.py
 python -X utf8 scripts/build.py --jdk '<JDK_PATH>' --cmake '<CMAKE_EXE>'
 ```
 
-脚本将 Android SDK、NDK 等依赖放在项目的 `.cache/` 和 `work/` 中，编译两个内核、构建界面并签名 APK。产物写入 `release/`。
+构建使用 Gradle Wrapper 9.1.0、AGP 9.0.0、Kotlin / Compose 编译插件 2.2.10、API 36 Extension 19、NDK r28c。脚本将 SDK / NDK 放到 `.cache/`，通过 Gradle 编译 Kotlin 界面和四个原生库，产物写入 `release/`。版本统一在 `version.properties` 中维护。
 
-后续构建沿用 `.cache/signing/development.jks`，保留此文件以使用相同签名更新安装。
+覆盖更新需恢复原来的 `.cache/signing/development.jks`。全新项目可用自己的 RSA 密钥创建这个文件，alias 为 `necmobile`、开发密码为 `android`。私钥不随源码包分发。
 
 ### 源码打包
 
@@ -107,7 +130,7 @@ python -X utf8 scripts/package_sources.py
 
 ## 代码结构
 
-界面使用 Java 17 和 Android 原生控件，模拟宿主使用 C/C++、JNI、ANativeWindow 和 AAudio。
+游戏库和设置使用 Kotlin、Compose / Material 3，业务与播放器使用 Java 17；模拟宿主使用 C/C++、JNI、ANativeWindow 和 AAudio，DOS 文件系统写入使用 FatFs。
 
 | 目录 | 内容 |
 | --- | --- |

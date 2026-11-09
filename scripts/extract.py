@@ -6,7 +6,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOADS = ROOT / 'work' / 'downloads'
 PACKAGES = {
-    'platforms-android-36': '.cache/android-sdk/platforms/android-36',
+    'platforms-android-36': '.cache/android-sdk/platforms/android-36-ext19',
     'build-tools-36.0.0': '.cache/android-sdk/build-tools/36.0.0',
     'ndk-28.2.13676358': '.cache/android-sdk/ndk/28.2.13676358',
     'platform-tools': '.cache/android-sdk/platform-tools',
@@ -18,6 +18,9 @@ for name, relative in PACKAGES.items():
     archive = DOWNLOADS / (name + '.zip')
     destination = ROOT / relative
     marker = destination / '.installed.json'
+    if name == 'np2kai-source' and (destination / 'sdl/libretro/libretro.c').is_file():
+        print('using existing NP2kai source', flush=True)
+        continue
     if marker.exists() or not archive.exists():
         continue
     print('extracting ' + name, flush=True)

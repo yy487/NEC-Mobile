@@ -13,5 +13,7 @@ NEC Mobile adaptations include the following changes.
 - Initialized mouse protocol state and connected the existing mouse hardware interface to Android input.
 - USART MIDI output forwarding through C2/C3 and initialized transmit/receive enable state.
 - Device-state save failure propagation and sound-buffer and timing reset after loading a state.
+- N80SR reset-time ROM selection, missing-bank guards, initialized ROM storage, and fallback for combined ROM images that omit N-BASIC data.
+- Per-game selection of six BASIC modes, CPU ratios, sub CPU scheduling, CPU/floppy waits, DIP switches, PCG, and display timing through the Android adapter.
 
 The native adapter adds D88 internal-disk selection, machine configuration, save-state file handling, and shutdown ordering for the Android lifecycle. The preparation script records the changes applied to the vendor source. [Adapter](../../native/pc88/adapter.cpp) · [Preparation script](../../scripts/prepare_m88.py)

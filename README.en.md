@@ -4,10 +4,10 @@
 
 Play PC-88 and PC-98 games on Android. NEC Mobile brings the M88 PC-88 core and the NP2kai PC-98 core into one app, with separate game libraries, resources, and machine settings for each platform.
 
-Current version **0.2.4-alpha**, for **ARM64 devices running Android 8.0 or later**.
+Current version **0.26.1**, for **ARM64 devices running Android 8.0 or later**.
 
-- [Download APK](https://github.com/yy487/NEC-Mobile/releases/download/v0.2.4-alpha/NEC-Mobile-0.2.4-alpha-arm64.apk)
-- [Download source archive](https://github.com/yy487/NEC-Mobile/releases/download/v0.2.4-alpha/NEC-Mobile-0.2.4-alpha-sources.zip)
+- Android APK `NEC-Mobile-0.26.1-arm64.apk`
+- Source archive `NEC-Mobile-0.26.1-sources.zip`
 
 ## Features
 
@@ -17,15 +17,18 @@ Current version **0.2.4-alpha**, for **ARM64 devices running Android 8.0 or late
 - Per-game machine, CPU, memory, sound board, and mixer settings.
 - Six manual save-state slots per game.
 - SF2 MIDI synthesis and audio recovery after backgrounding or output-device changes.
+- Compose / Material 3 platform entry, separate settings pages, and a launch-media sheet.
+- An independent automatic session slot, speed and aspect controls, and phone audio settings.
+- Import PC-98 DOS folders into private HDI disks and select FREECG98.BMP fonts.
 
 ## Getting started
 
 Menu labels below match the app's Chinese interface.
 
 1. Install the APK, open the app, and select **PC-88** or **PC-98**.
-2. Prepare the system ROMs and fonts needed by the game. Import them through **设置 → 导入系统 ROM / 字库**. You can also include game-specific resources in the game's folder or ZIP.
+2. The app supplies default boot firmware and fonts. Import game-specific firmware through **设置 → 导入系统 ROM / 字库**, or include it in the game's folder or ZIP.
 3. Select **添加游戏** and choose a folder or ZIP containing one game and its complete disk set.
-4. Tap the game card to start. To change the boot disk pair, open **管理 → 启动磁盘** and select the first and second disks.
+4. Tap a game card and confirm floppy A/B or a standalone hard disk in the launch sheet. Select **记住这次装盘** to save the selection, or edit **游戏管理 → 默认盘位**.
 
 The app stores game progress in imported disk copies. Tapping the card again boots the machine with the saved disk selection.
 
@@ -72,12 +75,24 @@ Load states using the same game copy, machine configuration, and sound hardware 
 
 To keep in-game saves, export the relevant disk through **管理 → 管理磁盘文件 → 导出磁盘副本**. Removing a game or uninstalling the app deletes its app-managed disks and save states.
 
+Enable automatic session saving in **游戏管理 → 系统设置** to save when backgrounding or exiting normally. Select **继续会话** on the card to resume. This slot is separate from the six manual slots. A failed restore shows its cause and leaves normal startup available.
+
 ## Machine, sound, and MIDI settings
 
-Open **管理 → 机器设置 / 音源设置** from the game card. Changes take effect the next time you start the game.
+Open **游戏管理 → 系统设置** from the game card. Changes take effect the next time you start the game.
 
-- **PC-88** offers N88 BASIC modes, 4/8 MHz operation, expansion memory, OPN/OPNA, and FM, SSG, ADPCM, and rhythm levels.
+- **PC-88** offers N88-V1(S), N88-V1(H), N88-V2, N, N80, and N80-V2 modes, 4/8 MHz operation, expansion memory, OPN/OPNA, and FM, SSG, ADPCM, and rhythm levels.
 - **PC-98** offers VX/VM/PC-286 models, CPU/FPU profiles, memory settings, and sound boards such as the 86, 26K, 118, and SB16 with board combinations. Mixer controls cover FM, SSG, ADPCM, PCM, rhythm, and BEEP.
+
+PC-88 also offers main/sub CPU ratios, sub CPU scheduling, CPU/floppy waits, DIP switches, PCG, and display timing. PC-98 adds sound BIOS, GDC, scanline, palette, and LCD settings.
+
+Speed settings are 50%, 100%, 150%, and 200%; audio pitch follows speed. Full-speed mode is muted. Aspect settings include 4:3, native pixels, fill, and integer scaling. Small screens fall back to proportional downscaling. Orientation is saved per game.
+
+**设置 → 手机音频输出** sets the shared output rate and buffer for subsequent launches. **更多设置 → 实际音频输出** in the player shows the active route and actual AAudio parameters. Core PCM is resampled to the output rate.
+
+Select or import PC-98 fonts through **游戏管理 → 字库设置 · FREECG98.BMP**. Imports are selected immediately for the next launch. Priority is manual choice, game package, global import, then bundled font. Within each source, FREECG98.BMP and FONT.BMP take priority over FONT.ROM. Supported BMP files are uncompressed 2048×2048 1-bit images; the app prepares a runtime copy and preserves the original. The last-start information shows the format accepted by the core.
+
+If Japanese disk names were decoded as GBK during extraction, **游戏管理 → 修复磁盘名称编码** previews their recovery from Shift_JIS bytes. It updates display labels without reimporting the disks.
 
 ### MIDI
 
@@ -85,7 +100,13 @@ Open **管理 → 机器设置 / 音源设置** from the game card. Changes take
 2. Enable MIDI in that game's **音源设置**.
 3. Start the game and select MIDI music in its own settings.
 
-TinySoundFont synthesizes General MIDI music using the selected SF2. PC-98 uses MPU-98 at E0D0/E0D2 with IRQ 6 by default. PC-88 uses the C2/C3 serial interface. Supply your own game images, ROMs, fonts, and SF2 soundfonts.
+TinySoundFont synthesizes General MIDI music using the selected SF2. PC-98 uses MPU-98 at E0D0/E0D2 with IRQ 6 by default. PC-88 uses the C2/C3 serial interface. Supply your own game images and SF2 soundfonts.
+
+## PC-98 DOS folders
+
+Select **添加游戏 → DOS 游戏目录 / DOS 游戏 ZIP** in the PC-98 library. Import a DOS HDI template, choose the BAT/EXE/COM entry, working directory, and DOS drive letter. Keep the template's driver initialization commands and remove its previous game launch command before creating the disk.
+
+Each game gets a private writable HDI. Names must follow DOS 8.3 rules in code page 932. Incompatible names, collisions, or insufficient space stop the import. Templates can contain PC-98 FAT12/FAT16 partitions and must have IO.SYS, MSDOS.SYS, and COMMAND.COM. Supply your own DOS system disk. Export the game HDI through disk management to back up its in-game saves.
 
 ## Building
 
@@ -97,9 +118,9 @@ python -X utf8 scripts/extract.py
 python -X utf8 scripts/build.py --jdk '<JDK_PATH>' --cmake '<CMAKE_EXE>'
 ```
 
-The scripts place Android SDK, NDK, and other dependencies in the project's `.cache/` and `work/` directories, compile both cores, build the interface, and sign the APK. Output goes to `release/`.
+The build uses Gradle Wrapper 9.1.0, AGP 9.0.0, Kotlin/Compose compiler 2.2.10, API 36 Extension 19, and NDK r28c. The scripts install SDK/NDK files in `.cache/` and use Gradle to compile the Kotlin UI and four native libraries. Output goes to `release/`. Versions are defined in `version.properties`.
 
-Keep `.cache/signing/development.jks` to sign future builds with the same key and install them as updates.
+Restore the original `.cache/signing/development.jks` for an upgrade. For a new project, create your own RSA keystore at that path with alias `necmobile` and development password `android`. Private keys are excluded from source archives.
 
 ### Source archive
 
@@ -109,7 +130,7 @@ python -X utf8 scripts/package_sources.py
 
 ## Code layout
 
-The interface uses Java 17 and native Android widgets. The emulation host uses C/C++, JNI, ANativeWindow, and AAudio.
+The library and settings use Kotlin with Compose / Material 3; business logic and the player use Java 17. The emulation host uses C/C++, JNI, ANativeWindow, and AAudio. DOS disk writing uses FatFs.
 
 | Directory | Contents |
 | --- | --- |

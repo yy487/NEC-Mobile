@@ -97,10 +97,9 @@ void Memory::Reset(uint, uint newmode)
 	sw31 = bus->In(0x31);
 	bool high = !(bus->In(0x6e) & 0x80);
 
-//	port33 = 0;
-
-	n80mode = (newmode & 2) && (port33 & 0x80 ? n80v2rom : n80rom);
 	n80srmode = (newmode == Config::N80V2);
+	port33 = n80srmode ? 0x82 : 0x02;
+	n80mode = (newmode & 2) && (n80srmode ? n80v2rom : n80rom);
 
 	waitmode = ((sw31 & 0x40) || (n80mode && n80srmode) ? 12 : 0) + (high ? 24 : 0);
 	selgvram = true;
@@ -274,6 +273,8 @@ void IOCALL Memory::Out33(uint, uint data)
 {
 	if (n80mode)
 	{
+		if (!(data & 0x80 ? n80v2rom : n80rom))
+			data = (data & ~0x80u) | (port33 & 0x80);
 		uint mod = data ^ port33;
 		port33 = data;
 		if (mod & 0x80) 
@@ -1036,6 +1037,7 @@ bool Memory::InitMemory()
 		Error::SetError(Error::OutOfMemory);
 		return false;
 	}
+	memset(rom, 0xff, romsize);
 	SetRAMPattern(ram, 0x10000);
 	memset(gvram, 0, sizeof(quadbyte) * 0x4000);
 	memset(tvram, 0, 0x1000);
@@ -1068,9 +1070,11 @@ bool Memory::LoadOptROM(const char* name, uint8*& rom, int size)
 		if (rom)
 		{
 			int r = file.Read(rom, size);
-			memset(rom + r, 0xff, size - r);
 			if (r > 0)
+			{
+				memset(rom + r, 0xff, size - r);
 				return true;
+			}
 		}
 	}
 	delete[] rom;
@@ -1099,15 +1103,17 @@ bool Memory::LoadROM()
 			erommask &= ~(1 << i);
 	}
 	
-	if (file.Open("pc88.rom", FileIO::readonly))
+	if (file.Open("pc88.rom", FileIO::readonly) && file.Seek(0, FileIO::end) &&
+		file.Tellp() >= 0x16000 && file.Seek(0, FileIO::begin))
 	{
-		file.Seek(0, FileIO::begin);
 		file.Read(rom + n88, 0x8000);
 		file.Read(rom + n80 + 0x6000, 0x2000);
 		file.Seek(0x2000, FileIO::current);
 		file.Read(rom + n88e, 0x8000);
 		file.Seek(0x2000, FileIO::current);
-		file.Read(rom + n80, 0x6000);
+		// An 88 KB combined image omits the first 24 KB of N-BASIC.
+		if (file.Read(rom + n80, 0x6000) != 0x6000)
+			LoadROMImage(rom + n80, "n80.rom", 0x8000);
 		return true;
 	}
 	

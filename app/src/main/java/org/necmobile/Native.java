@@ -20,5 +20,15 @@ final class Native {
     static native int diskIndex(int drive);
     static native void mount(int drive, String path, int index);
     static native String status();
+    static native String takeStartupWarning();
+    static native int startState();
+    static native String startError();
+    static native String machineInfo();
+    static native String audioInfo();
+    static native int audioDevice();
+    static native int videoGeometry();
+    static native String hdiInfo(String path) throws java.io.IOException;
+    static native byte[] dosAutoexec(String path) throws java.io.IOException;
+    static native void buildDosDisk(String template, String output, String[] hostFiles, byte[][] dosNames, byte[] startup, byte[] autoexec) throws java.io.IOException;
     static native void stop();
 }

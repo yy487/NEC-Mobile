@@ -70,6 +70,10 @@ UINT8 fontv98_read(const OEMCHAR *filename, UINT8 loading) {
 
 	// 第一水準漢字を読む必要がある？
 	if (loading & FONT_KNJ1) {
+#if defined(__LIBRETRO__)
+        extern int necmobile_font_kind;
+        necmobile_font_kind = 2;
+#endif
 		loading &= ~FONT_KNJ1;
 		v98knjcpy(fontrom, v98fnt, 0x01, 0x30);
 	}

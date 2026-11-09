@@ -90,9 +90,9 @@ bool SubSystem::LoadROM()
 	memset(rom, 0xff, 0x2000);
 	
 	FileIO fio;
-	if (fio.Open("PC88.ROM", FileIO::readonly))
+	if (fio.Open("PC88.ROM", FileIO::readonly) && fio.Seek(0, FileIO::end) &&
+		fio.Tellp() >= 0x16000 && fio.Seek(0x14000, FileIO::begin))
 	{
-		fio.Seek(0x14000, FileIO::begin);
 		fio.Read(rom, 0x2000);
 		return true;
 	}

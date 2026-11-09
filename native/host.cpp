@@ -35,11 +35,24 @@ std::atomic<bool> frameReceived{false};
 std::atomic<bool> workerRunning{false};
 std::atomic<bool> audioDisconnected{false};
 std::string status = "Ready";
+std::string startupWarning;
+std::string startupError;
+std::string machineInfo;
+std::atomic<int> startState{0};
 std::array<std::string, 2> driveMedia;
 std::array<int, 2> driveIndices{};
 unsigned videoWidth, videoHeight;
 AAudioStream* stream;
 unsigned audioRate;
+unsigned sourceRate, requestedAudioRate, audioBufferMs = 40;
+double hostSpeed = 1.0, resamplePosition = 0;
+bool fullSpeed = false, havePreviousSample = false;
+std::array<int16_t, 2> previousSample{};
+std::vector<int16_t> resampledAudio;
+std::string audioInfo = "Audio output has not started";
+std::atomic<unsigned> videoGeometry{0};
+std::atomic<int> outputDevice{0};
+std::chrono::steady_clock::time_point lastVideo{};
 std::chrono::steady_clock::time_point audioRetry{};
 unsigned outputVolume = 100;
 MidiSynth midiSynth;
@@ -57,6 +70,10 @@ void message(const char* text) {
     __android_log_write(ANDROID_LOG_INFO, "NECMobile", text);
     std::lock_guard<std::mutex> lock(statusMutex);
     status = text;
+    if (status.rfind("PC-98 config:", 0) == 0 || status.rfind("PC-88 config:", 0) == 0 || status.rfind("PC-98 sound BIOS loaded:", 0) == 0 || status.rfind("PC-98 font loaded:", 0) == 0) {
+        if (!machineInfo.empty()) machineInfo += "\n";
+        machineInfo += status;
+    }
     // Old M88 messages may contain CP932. NewStringUTF must receive valid UTF-8.
     for (char& byte : status) if (static_cast<unsigned char>(byte) >= 128) byte = '?';
 }
@@ -82,6 +99,7 @@ void closeAudio() {
     if (stream) { AAudioStream_requestStop(stream); AAudioStream_close(stream); }
     stream = nullptr;
     audioRate = 0;
+    sourceRate = 0; resamplePosition = 0; havePreviousSample = false;
     audioRead.store(0);
     audioWrite.store(0);
 }
@@ -97,29 +115,55 @@ void audio(const int16_t* samples, size_t frames, unsigned rate) {
         samples=mixedAudio.data();
     }
     if (audioDisconnected.exchange(false)) { closeAudio(); audioRetry = {}; message("Audio route disconnected; rebuilding"); }
-    if (paused.load() || stopping.load()) return;
-    if (audioRate != rate) {
+    if (paused.load() || stopping.load() || fullSpeed) return;
+    if (!stream || sourceRate != rate) {
         if (std::chrono::steady_clock::now() < audioRetry) return;
         closeAudio();
         audioRetry = std::chrono::steady_clock::now() + std::chrono::seconds(1);
         AAudioStreamBuilder* builder = nullptr;
         if (AAudio_createStreamBuilder(&builder) != AAUDIO_OK) return;
         AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_OUTPUT);
-        AAudioStreamBuilder_setSampleRate(builder, rate);
+        AAudioStreamBuilder_setSampleRate(builder, requestedAudioRate);
         AAudioStreamBuilder_setChannelCount(builder, 2);
         AAudioStreamBuilder_setFormat(builder, AAUDIO_FORMAT_PCM_I16);
         AAudioStreamBuilder_setSharingMode(builder, AAUDIO_SHARING_MODE_SHARED);
         AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+        AAudioStreamBuilder_setBufferCapacityInFrames(builder, int((requestedAudioRate ? requestedAudioRate : 48000) * audioBufferMs / 1000));
         AAudioStreamBuilder_setDataCallback(builder, audioCallback, nullptr);
         AAudioStreamBuilder_setErrorCallback(builder, audioError, nullptr);
         auto result = AAudioStreamBuilder_openStream(builder, &stream);
         AAudioStreamBuilder_delete(builder);
         if (result != AAUDIO_OK) { stream = nullptr; message("Audio unavailable; emulation continues muted"); return; }
+        audioRate = unsigned(AAudioStream_getSampleRate(stream));
+        outputDevice.store(AAudioStream_getDeviceId(stream));
+        if (!audioRate) { closeAudio(); return; }
+        int burst = std::max(1, AAudioStream_getFramesPerBurst(stream));
+        int requestedFrames = std::max(burst * 2, int(audioRate * audioBufferMs / 1000));
+        AAudioStream_setBufferSizeInFrames(stream, ((requestedFrames + burst - 1) / burst) * burst);
+        { std::lock_guard<std::mutex> lock(statusMutex);
+          audioInfo = "Requested: " + (requestedAudioRate ? std::to_string(requestedAudioRate) : "system") + " Hz / " + std::to_string(audioBufferMs) + " ms\nActual: " +
+            std::to_string(audioRate) + " Hz / " + std::to_string(AAudioStream_getBufferSizeInFrames(stream)) + " frames\nBurst: " +
+            std::to_string(burst) + " frames / device " + std::to_string(AAudioStream_getDeviceId(stream)); }
         if (AAudioStream_requestStart(stream) != AAUDIO_OK) { closeAudio(); return; }
-        audioRate = rate;
+        sourceRate = rate;
         message("Audio output ready");
     }
     if (!stream) return;
+    resampledAudio.clear();
+    const double step = rate * hostSpeed / audioRate;
+    for (size_t i = 0; i < frames; ++i) {
+        if (!havePreviousSample) {
+            previousSample = {samples[i * 2], samples[i * 2 + 1]}; havePreviousSample = true; continue;
+        }
+        while (resamplePosition < 1.0) {
+            for (size_t channel = 0; channel < 2; ++channel)
+                resampledAudio.push_back(int16_t(previousSample[channel] + (samples[i * 2 + channel] - previousSample[channel]) * resamplePosition));
+            resamplePosition += step;
+        }
+        resamplePosition -= 1.0;
+        previousSample = {samples[i * 2], samples[i * 2 + 1]};
+    }
+    samples = resampledAudio.data(); frames = resampledAudio.size() / 2;
     uint64_t write = audioWrite.load(std::memory_order_relaxed);
     uint64_t read = audioRead.load(std::memory_order_acquire);
     size_t count = std::min<uint64_t>(frames, audioCapacity - (write - read));
@@ -131,7 +175,13 @@ void audio(const int16_t* samples, size_t frames, unsigned rate) {
 }
 void video(const uint32_t* pixels, unsigned width, unsigned height) {
     if (!width || !height || width > 2048 || height > 2048) return;
+    videoGeometry.store((width << 16) | height);
     if (!frameReceived.exchange(true)) message("Running");
+    if (fullSpeed) {
+        auto now = std::chrono::steady_clock::now();
+        if (now - lastVideo < std::chrono::microseconds(16667)) return;
+        lastVideo = now;
+    }
     std::lock_guard<std::mutex> lock(windowMutex);
     if (!window) return;
     if (videoWidth != width || videoHeight != height) {
@@ -246,7 +296,11 @@ void run(int platform, std::string directory, std::string disk, std::string seco
         configuration=readMachineConfig(directory.c_str());
         for (const auto& setting:configuration) current.config+=setting.first+"="+setting.second+"\n";
         if (!hardDiskPath.empty()) current.config+="host_hard_disk="+hardDiskPath+"\n";
-        outputVolume = machineInt(readMachineConfig(directory.c_str()),"output_volume",100,0,100);
+        outputVolume = machineInt(configuration,"output_volume",100,0,100);
+        hostSpeed = machineInt(configuration,"host_speed",100,50,200) / 100.0;
+        fullSpeed = machineText(configuration,"host_fullspeed","OFF") == "ON";
+        requestedAudioRate = machineInt(configuration,"audio_rate",0,0,96000);
+        audioBufferMs = machineInt(configuration,"audio_buffer_ms",40,10,200);
         if (machineText(configuration,"midi_enabled","OFF")=="ON") {
             if (!midiSynth.open(machineText(configuration,"midi_soundfont",""),machineInt(configuration,"midi_volume",80,0,100)))
                 throw std::runtime_error("MIDI soundfont cannot be loaded; import a valid SF2 or turn MIDI off");
@@ -261,9 +315,14 @@ void run(int platform, std::string directory, std::string disk, std::string seco
         // PC-88 needs both internal disk selections installed before the boot reset.
         if (!core->open(directory.c_str(), platform == 88 ? "" : disk.c_str(), platform == 88 ? "" : secondDisk.c_str(), mode, {video, audio, message, [](uint8_t byte) {
                 if (midiSynth.enabled()) { if (!midiReceived) { midiReceived=true; message("MIDI hardware output active"); } midiSynth.write(byte); }
+            }, [](const char* text) {
+                __android_log_write(ANDROID_LOG_WARN, "NECMobile", text);
+                std::lock_guard<std::mutex> lock(statusMutex);
+                startupWarning = text;
             }})) {
-            message("Core initialization failed. Check the selected platform, ROMs and disk.");
-            throw std::runtime_error("Core initialization failed");
+            std::lock_guard<std::mutex> lock(statusMutex);
+            throw std::runtime_error(status == "Starting core..." ? "Core initialization failed. Check the selected platform, ROMs and disk." :
+                                     "Core initialization failed: " + status);
         }
         if (platform == 88) {
             if (firstIndex < 0 || firstIndex >= 64 || secondIndex < 0 || secondIndex >= 64 ||
@@ -274,12 +333,21 @@ void run(int platform, std::string directory, std::string disk, std::string seco
             core->reset();
         }
         if (!core->enableMouse(mouseEnabled)) throw std::runtime_error("Mouse connection failed");
+        if (core->diskPath) {
+            std::array<std::string, 2> expected{hardDiskPath.empty() ? disk : "", secondDisk};
+            for (int drive = 0; drive < 2; drive++) {
+                const char* actual = core->diskPath(drive);
+                if (expected[drive] != (actual ? actual : ""))
+                    throw std::runtime_error(drive == 0 ? "Floppy A could not be mounted" : "Floppy B could not be mounted");
+            }
+        }
         message(frameReceived.load() ? "Running" : "Core started; waiting for video");
         {
             std::lock_guard<std::mutex> lock(statusMutex);
             driveMedia = {hardDiskPath.empty() ? disk : "", secondDisk};
             driveIndices = {firstIndex, secondIndex};
         }
+        startState.store(2);
         auto next = std::chrono::steady_clock::now();
         auto lastFlush = next;
         while (!stopping.load()) {
@@ -327,6 +395,11 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                     } else if (platform == 88 && !command.path.empty() && !core->mount(command.a, previous.c_str(), previousIndex)) {
                         { std::lock_guard<std::mutex> lock(statusMutex); driveMedia[command.a].clear(); driveIndices[command.a] = 0; }
                         message("Disk mount failed; drive empty");
+                    } else if (core->diskPath) {
+                        const char* currentPath = core->diskPath(command.a);
+                        std::string actual = currentPath ? currentPath : "";
+                        { std::lock_guard<std::mutex> lock(statusMutex); driveMedia[command.a] = actual; driveIndices[command.a] = 0; }
+                        message(actual.empty() && !previous.empty() ? "Disk mount failed; drive empty" : "Disk mount failed");
                     } else message(command.path.empty() ? "Disk eject failed" : "Disk mount failed");
                     break;
                 }
@@ -385,7 +458,8 @@ void run(int platform, std::string directory, std::string disk, std::string seco
             }
             double fps = core->fps();
             if (fps < 10 || fps > 200) fps = 60;
-            next += std::chrono::microseconds(static_cast<int64_t>(1000000.0 / fps));
+            if (fullSpeed) { next = now; continue; }
+            next += std::chrono::microseconds(static_cast<int64_t>(1000000.0 / (fps * hostSpeed)));
             if (now - next > std::chrono::milliseconds(250)) next = now;
             std::unique_lock<std::mutex> lock(commandMutex);
             wake.wait_until(lock, next, [] { return stopping.load() || !commands.empty(); });
@@ -396,10 +470,13 @@ void run(int platform, std::string directory, std::string disk, std::string seco
         core = nullptr;
         message(saved ? "Stopped; disk changes flushed" : "Stopped; disk write failed");
     } catch (const std::exception& error) {
+        { std::lock_guard<std::mutex> lock(statusMutex); startupError = error.what(); }
+        startState.store(3);
         message(error.what());
         if (core) core->close();
     }
     closeAudio();
+    if (stopping.load()) startState.store(0);
     midiSynth.close();
     if (library) dlclose(library);
     { std::lock_guard<std::mutex> lock(commandMutex);
@@ -421,7 +498,8 @@ extern "C" JNIEXPORT jboolean JNICALL Java_org_necmobile_Native_start(JNIEnv* en
     stopping.store(false); paused.store(true); frameReceived.store(false);
     workerRunning.store(true);
     { std::lock_guard<std::mutex> lock(commandMutex); commands.clear(); }
-    { std::lock_guard<std::mutex> lock(statusMutex); driveMedia = {}; driveIndices = {}; }
+    { std::lock_guard<std::mutex> lock(statusMutex); driveMedia = {}; driveIndices = {}; startupWarning.clear(); startupError.clear(); machineInfo.clear(); }
+    startState.store(1);
     worker = std::thread(run, platform, string(env, dir), string(env, disk), string(env, secondDisk), mode, firstIndex, secondIndex, mouseEnabled != 0);
     return true;
 }
@@ -462,6 +540,27 @@ extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_mount(JNIEnv* env, j
 extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_status(JNIEnv* env, jclass) {
     std::lock_guard<std::mutex> lock(statusMutex);
     return env->NewStringUTF(status.c_str());
+}
+extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_takeStartupWarning(JNIEnv* env, jclass) {
+    std::lock_guard<std::mutex> lock(statusMutex);
+    jstring result = env->NewStringUTF(startupWarning.c_str());
+    startupWarning.clear();
+    return result;
+}
+extern "C" JNIEXPORT jint JNICALL Java_org_necmobile_Native_startState(JNIEnv*, jclass) { return startState.load(); }
+extern "C" JNIEXPORT jint JNICALL Java_org_necmobile_Native_videoGeometry(JNIEnv*, jclass) { return videoGeometry.load(); }
+extern "C" JNIEXPORT jint JNICALL Java_org_necmobile_Native_audioDevice(JNIEnv*, jclass) { return outputDevice.load(); }
+extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_audioInfo(JNIEnv* env, jclass) {
+    std::lock_guard<std::mutex> lock(statusMutex);
+    return env->NewStringUTF(audioInfo.c_str());
+}
+extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_startError(JNIEnv* env, jclass) {
+    std::lock_guard<std::mutex> lock(statusMutex);
+    return env->NewStringUTF(startupError.c_str());
+}
+extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_machineInfo(JNIEnv* env, jclass) {
+    std::lock_guard<std::mutex> lock(statusMutex);
+    return env->NewStringUTF(machineInfo.c_str());
 }
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_stop(JNIEnv*, jclass) {
     stopping.store(true); wake.notify_all();
