@@ -4,10 +4,10 @@
 
 PC-88 と PC-98 のゲームを Android で遊ぶためのエミュレーターです。M88 の PC-88 コアと NP2kai の PC-98 コアを一つのアプリに組み込み、ゲームライブラリ、リソース、マシン設定をプラットフォームごとに管理します。
 
-現在のバージョンは **0.26.1**。**Android 8.0 以降の ARM64 端末**に対応しています。
+現在の公開バージョンは **0.26.3**。**Android 8.0 以降の ARM64 端末**に対応しています。
 
-- Android APK `NEC-Mobile-0.26.1-arm64.apk`
-- ソースコード一式 `NEC-Mobile-0.26.1-sources.zip`
+- Android APK `NEC-Mobile-0.26.3-arm64.apk`
+- ソースコード一式 `NEC-Mobile-0.26.3-sources.zip`
 
 ## 主な機能
 
@@ -108,6 +108,23 @@ PC-98 ライブラリの **添加游戏 → DOS 游戏目录 / DOS 游戏 ZIP** 
 
 ゲームごとに専用の書き込み可能な HDI を使います。名前はコードページ 932 の DOS 8.3 形式が必要です。不正な名前、重複、空き容量不足の場合は取り込みを中止します。テンプレートは PC-98 の FAT12 / FAT16 に対応し、IO.SYS、MSDOS.SYS、COMMAND.COM が必要です。DOS システムは利用者が用意してください。ディスク管理から HDI を書き出してゲーム内セーブを保管できます。
 
+DOS 同梱のローカルビルドではシステムテンプレートを自動で準備します。起動ファイルを確認してディスクを作成でき、作業ディレクトリ、ドライブ文字、初期化コマンド、別のテンプレートは詳細起動設定から選べます。
+
+## 実行に必要なリソース
+
+エミュレーターのコアと実行用ライブラリーは APK に含まれます。端末は Android 8.0 以降の ARM64 が必要です。
+
+| リソース | 現在の提供方法 |
+| --- | --- |
+| ゲームディスク、完全な DOS フォルダー、専用ドライバー | 起動スクリプトや常駐プログラムも含めて利用者が用意 |
+| PC-88 BASIC、フロッピー、文字・漢字 ROM | 対応する六つの BASIC モード用を同梱 |
+| PC-98 互換 BIOS、標準フォント、標準音源 BIOS | 標準構成用をコアと APK で提供 |
+| DOS システム | 公開版はテンプレートを取り込み、ローカル同梱版は自動準備 |
+| SF2 音色ライブラリー | MIDI を使う場合に利用者が取り込み |
+| 翻訳版や独自文字配置用のフォント | ゲーム付属のものを使用。標準フォントは同梱 |
+| 別の音源 BIOS、PC-88 辞書・拡張 ROM | 対応ソフトや特殊な構成で必要な場合に用意 |
+| OPNA リズムサンプル `2608_*.WAV` | 六つのサンプルを APK に同梱。取り込み後の小文字名と RYM / RIM の別名に対応 |
+
 ## ビルド
 
 Windows でのビルドには **Python 3.11+、Node.js 22+、JDK 17+、CMake 3.22+** が必要です。プロジェクトのルートで、プレースホルダーを手元のパスに置き換えて実行します。
@@ -121,6 +138,8 @@ python -X utf8 scripts/build.py --jdk '<JDK_PATH>' --cmake '<CMAKE_EXE>'
 Gradle Wrapper 9.1.0、AGP 9.0.0、Kotlin / Compose コンパイラー 2.2.10、API 36 Extension 19、NDK r28c を使います。SDK / NDK は `.cache/` に配置し、Gradle で Kotlin UI と 4 個のネイティブライブラリをビルドします。出力先は `release/`、バージョン定義は `version.properties` です。
 
 更新には元の `.cache/signing/development.jks` を使います。新規プロジェクトでは同じパスに独自の RSA キーを作成し、alias を `necmobile`、開発用パスワードを `android` に設定できます。秘密鍵はソース ZIP に含めません。
+
+DOS 同梱のローカルビルドでは、独自のシステム専用テンプレートを `.cache/private-dos/dos/default.hdi.gz` に置き、ビルドコマンドに `--bundle-dos` を追加します。出力は `NEC-Mobile-<version>-builtin-dos-arm64.apk` です。システムデータはローカルに保持し、通常ビルドではテンプレートの取り込みを使います。
 
 ### ソースコードのパッケージ作成
 
@@ -136,7 +155,7 @@ python -X utf8 scripts/package_sources.py
 | --- | --- |
 | `app/` | ゲームライブラリ、プレイ画面、入力、設定 |
 | `native/` | エミュレーションスレッド、映像、音声、MIDI、コアの接続処理 |
-| `third_party/` | M88、NP2kai、TinySoundFont のソース |
+| `third_party/` | M88、NP2kai、TinySoundFont、FatFs のソース |
 | `scripts/` | 依存ファイルの取得、ソースの適応、ビルド、パッケージ作成 |
 | `tests/` | Java、ネイティブコード、Android の機能チェック |
 | `release/` | APK とソースコードの ZIP |

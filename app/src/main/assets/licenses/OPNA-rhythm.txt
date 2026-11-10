@@ -1,0 +1,9 @@
+OPNA rhythm PCM resources
+
+The six WAV files are copied from the M88 2.12a distribution supplied for this
+project. Original names: 2608_BD.WAV, 2608_SD.WAV, 2608_TOP.WAV, 2608_HH.WAV,
+2608_TOM.WAV, and 2608_RYM.WAV.
+
+NEC Mobile stores their names in lowercase and supplies the RYM sample under
+the standard RIM name. The PCM content is retained. M88 and FMGEN notices
+accompany the application in M88-original-readme.txt and M88-FMGEN-readme.txt.

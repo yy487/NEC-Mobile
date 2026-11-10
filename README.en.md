@@ -4,10 +4,10 @@
 
 Play PC-88 and PC-98 games on Android. NEC Mobile brings the M88 PC-88 core and the NP2kai PC-98 core into one app, with separate game libraries, resources, and machine settings for each platform.
 
-Current version **0.26.1**, for **ARM64 devices running Android 8.0 or later**.
+Latest public version **0.26.3**, for **ARM64 devices running Android 8.0 or later**.
 
-- Android APK `NEC-Mobile-0.26.1-arm64.apk`
-- Source archive `NEC-Mobile-0.26.1-sources.zip`
+- Android APK `NEC-Mobile-0.26.3-arm64.apk`
+- Source archive `NEC-Mobile-0.26.3-sources.zip`
 
 ## Features
 
@@ -108,6 +108,23 @@ Select **添加游戏 → DOS 游戏目录 / DOS 游戏 ZIP** in the PC-98 libra
 
 Each game gets a private writable HDI. Names must follow DOS 8.3 rules in code page 932. Incompatible names, collisions, or insufficient space stop the import. Templates can contain PC-98 FAT12/FAT16 partitions and must have IO.SYS, MSDOS.SYS, and COMMAND.COM. Supply your own DOS system disk. Export the game HDI through disk management to back up its in-game saves.
 
+Local builds with bundled DOS prepare the system template automatically. Confirm the game entry to create its disk; the working directory, DOS drive, initialization commands, and alternative templates are available in advanced startup settings.
+
+## Runtime resources
+
+The APK includes the emulator cores and runtime libraries. Phones require Android 8.0 or later on ARM64.
+
+| Resource | Current availability |
+| --- | --- |
+| Game disks, complete DOS folders, and game-specific drivers | Supplied by the player, including launch scripts and resident programs |
+| PC-88 BASIC, floppy, character, and kanji ROMs | Bundled for the six supported BASIC modes |
+| PC-98 compatible BIOS, standard font, and default sound BIOS | Supplied by the core and APK for the default configuration |
+| DOS system | Imported template in the public build; prepared automatically in local bundled-DOS builds |
+| SF2 soundfont | Imported by the player when enabling MIDI |
+| Fonts for translations or custom character mappings | Supplied with the game; standard fonts are bundled |
+| Other sound BIOS, PC-88 dictionary, or expansion ROMs | Needed only by software or configurations that use them |
+| OPNA rhythm samples, `2608_*.WAV` | The APK bundles all six samples and supports lowercase imported names and RYM/RIM aliases |
+
 ## Building
 
 The Windows build requires **Python 3.11+, Node.js 22+, JDK 17+, and CMake 3.22+**. Run the following commands from the project root, replacing the placeholders with local paths.
@@ -121,6 +138,8 @@ python -X utf8 scripts/build.py --jdk '<JDK_PATH>' --cmake '<CMAKE_EXE>'
 The build uses Gradle Wrapper 9.1.0, AGP 9.0.0, Kotlin/Compose compiler 2.2.10, API 36 Extension 19, and NDK r28c. The scripts install SDK/NDK files in `.cache/` and use Gradle to compile the Kotlin UI and four native libraries. Output goes to `release/`. Versions are defined in `version.properties`.
 
 Restore the original `.cache/signing/development.jks` for an upgrade. For a new project, create your own RSA keystore at that path with alias `necmobile` and development password `android`. Private keys are excluded from source archives.
+
+For a local bundled-DOS build, supply a clean system template at `.cache/private-dos/dos/default.hdi.gz` and add `--bundle-dos` to the build command. The output is `NEC-Mobile-<version>-builtin-dos-arm64.apk`. System data stays local; ordinary builds retain template import.
 
 ### Source archive
 
@@ -136,7 +155,7 @@ The library and settings use Kotlin with Compose / Material 3; business logic an
 | --- | --- |
 | `app/` | Game library, player interface, input, and settings |
 | `native/` | Emulation thread, video, audio, MIDI, and core adapters |
-| `third_party/` | M88, NP2kai, and TinySoundFont sources |
+| `third_party/` | M88, NP2kai, TinySoundFont, and FatFs sources |
 | `scripts/` | Dependency downloads, source adaptations, builds, and packaging |
 | `tests/` | Java, native, and Android feature checks |
 | `release/` | APK and source archives |

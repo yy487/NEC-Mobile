@@ -28,6 +28,13 @@ bool PC8801::Sound::ResetAfterState()
 '''
         if path.name == 'psg.cpp':
             changed = changed.replace(b'{  0,  1, -1,  0 }', b'{  0,  1, 255,  0 }')
+        if directory == 'devices' and path.name == 'opna.cpp' and b'NecRhythm::load' not in changed:
+            newline = b'\r\n' if b'\r\n' in changed else b'\n'
+            body = b'bool OPNA::LoadRhythmSample(const char* path)\n{\n    return NecRhythm::load<FileIO>(rhythm, rate, path);\n}'.replace(b'\n', newline)
+            changed, count = re.subn(rb'bool OPNA::LoadRhythmSample\(const char\* path\)\s*\{.*?\r?\n\}', lambda match: body, changed, count=1, flags=re.S)
+            if count != 1: raise ValueError('M88 rhythm loader not found')
+            at = changed.index(b'#include')
+            changed = changed[:at] + b'#include "../../../../native/rhythm_wav.h"' + newline + changed[at:]
         if path.name == 'screen.cpp':
             changed = changed.replace(b'BETable0[1 << sizeof(packed)] = { -1 }', b'BETable0[1 << sizeof(packed)] = { 0xffffffffu }')
         if path.name == 'srcbuf.cpp':

@@ -61,6 +61,11 @@ android {
         getByName("debug") { signingConfig = signingConfigs.getByName("existing") }
     }
     sourceSets.getByName("main").jniLibs.srcDir(nativeOutput.get().asFile)
+    if (providers.gradleProperty("nec.bundlePrivateDos").getOrElse("false").toBoolean()) {
+        val dosAssets = rootProject.file(".cache/private-dos")
+        check(dosAssets.resolve("dos/default.hdi.gz").isFile) { "Local DOS image missing: .cache/private-dos/dos/default.hdi.gz" }
+        sourceSets.getByName("main").assets.srcDir(dosAssets)
+    }
     packaging { jniLibs.useLegacyPackaging = true }
 }
 

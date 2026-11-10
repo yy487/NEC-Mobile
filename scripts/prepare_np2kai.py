@@ -1,5 +1,6 @@
 """Expose actual floppy insertion/ejection in the private NP2kai source copy."""
 from pathlib import Path
+import re
 
 root = Path(__file__).resolve().parents[1] / 'third_party/np2kai-source'
 sound_source = root / 'sound/soundrom.c'
@@ -63,6 +64,57 @@ if b'extern int necmobile_sound_bios_enabled;' not in sound_data:
         sound_data = sound_data.replace(declaration, declaration + b'\n#if defined(__LIBRETRO__)\n    if (!necmobile_sound_bios_enabled) { soundrom_reset(); return; }\n#endif', 1)
 if sound_data != sound_previous:
     sound_source.write_bytes(sound_data)
+
+rhythm_source = root / 'sound/fmgen/fmgen_opna.cpp'
+rhythm_data = rhythm_source.read_bytes()
+if b'NecRhythm::load' not in rhythm_data:
+    body = b'bool OPNA::LoadRhythmSample(const char* path)\n{\n    return NecRhythm::load<FileIO>(rhythm, rate, path);\n}'
+    rhythm_data, count = re.subn(rb'bool OPNA::LoadRhythmSample\(const char\* path\)\s*\{.*?\r?\n\}', lambda match: body, rhythm_data, count=1, flags=re.S)
+    if count != 1: raise ValueError('PC-98 rhythm loader not found')
+    at = rhythm_data.index(b'#include')
+    rhythm_source.write_bytes(rhythm_data[:at] + b'#include "../../../../native/rhythm_wav.h"\n' + rhythm_data[at:])
+
+file_source = root / 'sound/fmgen/fmgen_file.cpp'
+file_data = file_source.read_bytes()
+if b'NEC Mobile: imported resource names' not in file_data:
+    file_data = file_data.replace(b'#include "fmgen_file.h"', b'#include "fmgen_file.h"\n#include <string>', 1)
+    file_data = file_data.replace(b'pfile = fopen(filename, mode);', b'''pfile = fopen(filename, mode);
+    // NEC Mobile: imported resource names use lowercase basenames on Android.
+    if (!pfile && (flg & readonly)) {
+        std::string fallback(filename);
+        size_t first = fallback.find_last_of("/\\\\");
+        first = first == std::string::npos ? 0 : first + 1;
+        for (size_t i = first; i < fallback.size(); ++i)
+            if (fallback[i] >= 'A' && fallback[i] <= 'Z') fallback[i] += 'a' - 'A';
+        if (fallback != filename) pfile = fopen(fallback.c_str(), mode);
+    }''', 1)
+    if b'NEC Mobile: imported resource names' not in file_data: raise ValueError('FMGEN open entry not found')
+    file_data, count = re.subn(rb'\tDWORD readsize;\s*if \(!\(readsize = fread\(dest, 1, size, pfile\)\)\)\s*return -1;\s*return size;',
+        b'\tif (size < 0) return -1;\n\treturn int32(fread(dest, 1, size, pfile));', file_data, count=1)
+    if count != 1: raise ValueError('FMGEN read entry not found')
+    file_source.write_bytes(file_data)
+file_data = file_source.read_bytes()
+fixed_seek = file_data.replace(b'return fseek(pfile, pos, origin);', b'return fseek(pfile, pos, origin) == 0;')
+if fixed_seek != file_data: file_source.write_bytes(fixed_seek)
+
+# PCM buffers belong to this process; save files retain the existing struct layout.
+rhythm_data = rhythm_source.read_bytes()
+old_load = b'memcpy(rhythm, data->rhythm, sizeof(Rhythm) * 6);'
+if old_load in rhythm_data:
+    rhythm_data = rhythm_data.replace(old_load, b'''for (unsigned i = 0; i < 6; ++i) {
+        rhythm[i].pan = data->rhythm[i].pan;
+        rhythm[i].level = data->rhythm[i].level;
+        rhythm[i].volume = data->rhythm[i].volume;
+        rhythm[i].pos = Min(data->rhythm[i].pos, rhythm[i].size);
+    }''', 1)
+    rhythm_source.write_bytes(rhythm_data)
+opna_source = root / 'sound/opna.c'
+opna_data = opna_source.read_bytes()
+old_reload = b'getbiospath(path, "", NELEMENTS(path));\n\t\t\tOPNA_LoadRhythmSample(opna->fmgen, path);'
+if old_reload in opna_data:
+    opna_data = opna_data.replace(old_reload, b'/* The initialized rhythm buffers are retained by OPNA_DataLoad. */', 1)
+    opna_data = opna_data.replace(b'OEMCHAR\tpath[MAX_PATH];\n\t\t\tvoid* buf;', b'void* buf;', 1)
+    opna_source.write_bytes(opna_data)
 
 source = root / 'sdl/libretro/libretro.c'
 data = source.read_bytes()

@@ -331,6 +331,12 @@ final class GameLibrary {
             try (InputStream input = new FileInputStream(file)) { copyFirmware(input, target); }
             if (marker.isFile() && !marker.delete()) throw new IOException("无法更新固件来源：" + name);
         }
+        File oldRim = new File(dest, "2608_rym.wav"), rim = new File(dest, "2608_rim.wav");
+        File rimDefault = new File(defaults, "2608_rim.wav");
+        if (oldRim.isFile() && (!rim.isFile() || rimDefault.isFile())) {
+            try (InputStream input = new FileInputStream(oldRim)) { copyFirmware(input, rim); }
+            if (rimDefault.isFile() && !rimDefault.delete()) throw new IOException("无法保存边鼓采样来源");
+        }
         String assetDirectory = "firmware/pc" + platform;
         String[] assets = context.getAssets().list(assetDirectory);
         if (assets == null || assets.length == 0) throw new IOException("安装包缺少内置固件");

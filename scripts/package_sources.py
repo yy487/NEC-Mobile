@@ -25,7 +25,7 @@ for folder in ('app', 'native', 'scripts', 'tests',
             continue
         if relative.parent.as_posix() == 'third_party/m88/src/pc88' and file.name in ('ioview.cpp', 'memview.cpp'):
             continue
-        bundled_firmware = relative.is_relative_to('app/src/main/assets/firmware') and file.suffix.lower() in ('.rom', '.fnt')
+        bundled_firmware = relative.is_relative_to('app/src/main/assets/firmware') and file.suffix.lower() in ('.rom', '.fnt', '.wav')
         if not bundled_firmware and file.suffix.lower() in ('.rom', '.wav', '.fnt', '.sf2', '.sf3', '.dls',
                                   '.d88', '.88d', '.fdi', '.hdi', '.nhd', '.hdd', '.thd', '.xdf', '.hdm',
                                   '.bin', '.exe', '.dll', '.pdb', '.obj', '.apk', '.idsig', '.jks', '.keystore', '.zip'):

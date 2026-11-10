@@ -4,10 +4,10 @@
 
 在 Android 上运行 PC-88 和 PC-98 游戏。项目将 M88 的 PC-88 内核与 NP2kai 的 PC-98 内核集成到同一个应用，分别管理两种平台的游戏、资源和机器配置。
 
-当前版本 **0.26.1**，适用于 **Android 8.0 及以上、ARM64** 设备。
+当前公开版本 **0.26.3**，适用于 **Android 8.0 及以上、ARM64** 设备。
 
-- Android 安装包 `NEC-Mobile-0.26.1-arm64.apk`
-- 源码包 `NEC-Mobile-0.26.1-sources.zip`
+- Android 安装包 `NEC-Mobile-0.26.3-arm64.apk`
+- 源码包 `NEC-Mobile-0.26.3-sources.zip`
 
 ## 功能
 
@@ -108,6 +108,23 @@ MIDI 通过 TinySoundFont 使用 SF2 合成 General MIDI 音乐。PC-98 使用 M
 
 每款游戏使用独立的可写 HDI。文件名需符合代码页 932 的 DOS 8.3 规则；不兼容名称、重名与空间不足会中止导入。模板支持 PC-98 FAT12 / FAT16 分区，必须具备 IO.SYS、MSDOS.SYS 和 COMMAND.COM。应用不提供 DOS 系统盘。可从磁盘管理导出游戏 HDI，备份游戏内存档。
 
+本地内置 DOS 构建版会自动准备系统模板，默认只需确认游戏启动文件即可建立硬盘。工作目录、盘符、初始化命令和其他模板入口放在高级启动设置中。
+
+## 运行资源
+
+模拟核心与运行库随 APK 提供，手机只需 Android 8.0 及以上的 ARM64 系统。
+
+| 资源 | 当前提供方式 |
+| --- | --- |
+| 游戏磁盘、完整 DOS 游戏目录及配套驱动 | 玩家提供；目录中的启动脚本与驻留程序需随游戏完整导入 |
+| PC-88 常用 BASIC、软驱、字符与汉字 ROM | 已内置，覆盖六种 BASIC 模式 |
+| PC-98 兼容 BIOS、标准字库、默认声卡 BIOS | 内核与 APK 已提供；普通默认配置无需另找 |
+| DOS 启动系统 | 公开版使用导入模板；本地内置构建版自动准备 |
+| SF2 MIDI 音色库 | 当前需自行导入，仅启用 MIDI 时需要 |
+| 汉化或特殊字体映射所需字库 | 使用游戏配套字库；标准字体已内置 |
+| 其他声卡 ROM、PC-88 辞书或扩展 ROM | 按软件和特殊硬件配置提供，常规启动不要求 |
+| OPNA 节奏采样 `2608_*.WAV` | 已内置六个采样，并支持导入后的小写名称及 RYM / RIM 别名 |
+
 ## 构建
 
 Windows 构建需要 **Python 3.11+、Node.js 22+、JDK 17+、CMake 3.22+**。在项目根目录运行以下命令，将占位符替换为本机路径。
@@ -121,6 +138,8 @@ python -X utf8 scripts/build.py --jdk '<JDK_PATH>' --cmake '<CMAKE_EXE>'
 构建使用 Gradle Wrapper 9.1.0、AGP 9.0.0、Kotlin / Compose 编译插件 2.2.10、API 36 Extension 19、NDK r28c。脚本将 SDK / NDK 放到 `.cache/`，通过 Gradle 编译 Kotlin 界面和四个原生库，产物写入 `release/`。版本统一在 `version.properties` 中维护。
 
 覆盖更新需恢复原来的 `.cache/signing/development.jks`。全新项目可用自己的 RSA 密钥创建这个文件，alias 为 `necmobile`、开发密码为 `android`。私钥不随源码包分发。
+
+本地内置 DOS 构建使用 `.cache/private-dos/dos/default.hdi.gz` 中自备的纯系统模板，在上述构建命令后添加 `--bundle-dos`。输出为 `NEC-Mobile-<版本>-builtin-dos-arm64.apk`。系统资源保留在本机，普通构建继续使用模板导入流程。
 
 ### 源码打包
 
@@ -136,7 +155,7 @@ python -X utf8 scripts/package_sources.py
 | --- | --- |
 | `app/` | 游戏库、运行界面、输入与设置 |
 | `native/` | 模拟线程、视频、音频、MIDI 与内核适配 |
-| `third_party/` | M88、NP2kai、TinySoundFont 源码 |
+| `third_party/` | M88、NP2kai、TinySoundFont、FatFs 源码 |
 | `scripts/` | 依赖下载、源码适配、构建与打包 |
 | `tests/` | Java、原生代码与 Android 功能检查 |
 | `release/` | APK 和源码包 |

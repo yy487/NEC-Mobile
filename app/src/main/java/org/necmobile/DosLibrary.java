@@ -18,8 +18,13 @@ final class DosLibrary {
     static final class Template {
         final File file;
         final String name, info, autoexec;
+        final boolean builtin;
         Template(File file, String name, String info, String autoexec) {
+            this(file, name, info, autoexec, false);
+        }
+        Template(File file, String name, String info, String autoexec, boolean builtin) {
             this.file = file; this.name = name; this.info = info; this.autoexec = autoexec;
+            this.builtin = builtin;
         }
     }
     static final class Draft {
@@ -40,19 +45,39 @@ final class DosLibrary {
         templates = new File(games.legacy.root, "dos-templates"); templates.mkdirs();
     }
     List<Template> templates() throws IOException {
+        installBuiltin();
         List<Template> result = new ArrayList<>();
         File[] files = templates.listFiles(file -> file.isFile() && file.getName().endsWith(".hdi"));
         if (files == null) return result;
         for (File file : files) {
-            String name = file.getName();
+            boolean builtin = file.getName().equals("builtin-dos-v1.hdi");
+            String name = builtin ? "内置 DOS 系统" : file.getName();
             File label = new File(file + ".label");
             if (label.isFile() && label.length() < 1024) try (InputStream in = new FileInputStream(label); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 Library.copy(in, out, 1024); name = new String(out.toByteArray(), StandardCharsets.UTF_8);
             }
-            try { result.add(new Template(file, name, Native.hdiInfo(file.getAbsolutePath()), new String(Native.dosAutoexec(file.getAbsolutePath()), OEM).replace("\u001a", ""))); }
+            try { result.add(new Template(file, name, Native.hdiInfo(file.getAbsolutePath()), new String(Native.dosAutoexec(file.getAbsolutePath()), OEM).replace("\u001a", ""), builtin)); }
             catch (IOException failure) { result.add(new Template(file, name, "不可用 · " + failure.getMessage(), "")); }
         }
-        result.sort(Comparator.comparing(template -> template.name)); return result;
+        result.sort(Comparator.comparing((Template template) -> !template.builtin).thenComparing(template -> template.name)); return result;
+    }
+    private void installBuiltin() throws IOException {
+        String[] bundled = context.getAssets().list("dos");
+        if (bundled == null || !Arrays.asList(bundled).contains("default.hdi")) return;
+        File target = new File(templates, "builtin-dos-v1.hdi");
+        if (target.isFile()) return;
+        File temporary = File.createTempFile("builtin-dos-", ".pending", templates);
+        try {
+            // AAPT expands a .gz asset and removes its suffix when packaging it.
+            try (InputStream input = context.getAssets().open("dos/default.hdi");
+                 FileOutputStream output = new FileOutputStream(temporary)) {
+                if (Library.copy(input, output, 256L * 1024 * 1024) == 0) throw new IOException("内置 DOS 系统为空");
+                output.getFD().sync();
+            }
+            Native.hdiInfo(temporary.getAbsolutePath());
+            android.system.Os.rename(temporary.getAbsolutePath(), target.getAbsolutePath());
+        } catch (android.system.ErrnoException error) { throw new IOException("无法安装内置 DOS 系统", error); }
+        finally { temporary.delete(); }
     }
     Template importTemplate(Uri uri) throws Exception {
         String name = games.legacy.name(uri);

@@ -15,6 +15,7 @@ extern "C" {
 #include "fmgen_types.h"
 #include "fmgen_headers.h"
 #include "fmgen_file.h"
+#include <string>
 
 // ---------------------------------------------------------------------------
 //	構築/消滅
@@ -59,6 +60,15 @@ bool FileIO::Open(const char* filename, uint flg)
 	}
 
 	pfile = fopen(filename, mode);
+    // NEC Mobile: imported resource names use lowercase basenames on Android.
+    if (!pfile && (flg & readonly)) {
+        std::string fallback(filename);
+        size_t first = fallback.find_last_of("/\\");
+        first = first == std::string::npos ? 0 : first + 1;
+        for (size_t i = first; i < fallback.size(); ++i)
+            if (fallback[i] >= 'A' && fallback[i] <= 'Z') fallback[i] += 'a' - 'A';
+        if (fallback != filename) pfile = fopen(fallback.c_str(), mode);
+    }
 
 	flags = (flg & readonly) | (pfile == NULL ? 0 : open);
 
@@ -120,10 +130,8 @@ int32 FileIO::Read(void* dest, int32 size)
 	if (!(GetFlags() & open))
 		return -1;
 	
-	DWORD readsize;
-	if (!(readsize = fread(dest, 1, size, pfile)))
-		return -1;
-	return size;
+	if (size < 0) return -1;
+	return int32(fread(dest, 1, size, pfile));
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +174,7 @@ bool FileIO::Seek(int32 pos, SeekMethod method)
 		return false;
 	}
 
-	return fseek(pfile, pos, origin);
+	return fseek(pfile, pos, origin) == 0;
 }
 
 // ---------------------------------------------------------------------------

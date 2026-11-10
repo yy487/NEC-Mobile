@@ -15,5 +15,6 @@ NEC Mobile adaptations include the following changes.
 - Device-state save failure propagation and sound-buffer and timing reset after loading a state.
 - N80SR reset-time ROM selection, missing-bank guards, initialized ROM storage, and fallback for combined ROM images that omit N-BASIC data.
 - Per-game selection of six BASIC modes, CPU ratios, sub CPU scheduling, CPU/floppy waits, DIP switches, PCG, and display timing through the Android adapter.
+- Shared bounded mono PCM WAV loading for OPNA rhythm, RYM/RIM alias handling, and array replacement after the complete sample bank is read.
 
 The native adapter adds D88 internal-disk selection, machine configuration, save-state file handling, and shutdown ordering for the Android lifecycle. The preparation script records the changes applied to the vendor source. [Adapter](../../native/pc88/adapter.cpp) · [Preparation script](../../scripts/prepare_m88.py)

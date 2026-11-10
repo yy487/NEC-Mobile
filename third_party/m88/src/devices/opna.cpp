@@ -4,6 +4,7 @@
 // ---------------------------------------------------------------------------
 //	$Id: opna.cpp,v 1.70 2004/02/06 13:13:39 cisc Exp $
 
+#include "../../../../native/rhythm_wav.h"
 #include "headers.h"
 #include "misc.h"
 #include "opna.h"
@@ -1276,87 +1277,7 @@ bool OPNA::SetRate(uint c, uint r, bool ipflag)
 //
 bool OPNA::LoadRhythmSample(const char* path)
 {
-	static const char* rhythmname[6] =
-	{
-		"BD", "SD", "TOP", "HH", "TOM", "RIM",
-	};
-
-	int i;
-	for (i=0; i<6; i++)
-		rhythm[i].pos = ~0;
-
-	for (i=0; i<6; i++)
-	{
-		FileIO file;
-		uint32 fsize;
-		char buf[MAX_PATH] = "";
-		if (path)
-			strncpy(buf, path, MAX_PATH);
-		strncat(buf, "2608_", MAX_PATH);
-		strncat(buf, rhythmname[i], MAX_PATH);
-		strncat(buf, ".WAV", MAX_PATH);
-
-		if (!file.Open(buf, FileIO::readonly))
-		{
-			if (i != 5)
-				break;
-			if (path)
-				strncpy(buf, path, MAX_PATH);
-			strncpy(buf, "2608_RYM.WAV", MAX_PATH);
-			if (!file.Open(buf, FileIO::readonly))
-				break;
-		}
-		
-		struct
-		{
-			uint32 chunksize;
-			uint16 tag;
-			uint16 nch;
-			uint32 rate;
-			uint32 avgbytes;
-			uint16 align;
-			uint16 bps;
-			uint16 size;
-		} whdr;
-
-		file.Seek(0x10, FileIO::begin);
-		file.Read(&whdr, sizeof(whdr));
-		
-		uint8 subchunkname[4];
-		fsize = 4 + whdr.chunksize - sizeof(whdr);
-		do 
-		{
-			file.Seek(fsize, FileIO::current);
-			file.Read(&subchunkname, 4);
-			file.Read(&fsize, 4);
-		} while (memcmp("data", subchunkname, 4));
-
-		fsize /= 2;
-		if (fsize >= 0x100000 || whdr.tag != 1 || whdr.nch != 1)
-			break;
-		fsize = Max(fsize, (1<<31)/1024);
-		
-		delete rhythm[i].sample;
-		rhythm[i].sample = new int16[fsize];
-		if (!rhythm[i].sample)
-			break;
-		
-		file.Read(rhythm[i].sample, fsize * 2);
-		
-		rhythm[i].rate = whdr.rate;
-		rhythm[i].step = rhythm[i].rate * 1024 / rate;
-		rhythm[i].pos = rhythm[i].size = fsize * 1024;
-	}
-	if (i != 6)
-	{
-		for (i=0; i<6; i++)
-		{
-			delete[] rhythm[i].sample;
-			rhythm[i].sample = 0;
-		}
-		return false;
-	}
-	return true;
+    return NecRhythm::load<FileIO>(rhythm, rate, path);
 }
 
 

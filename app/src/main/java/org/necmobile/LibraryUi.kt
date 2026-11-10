@@ -219,6 +219,7 @@ internal class LibraryUi(private val activity: MainActivity) {
         var directory by remember(draft.game.id) { mutableStateOf(entry.substringBeforeLast('/', "")) }
         var drive by remember(draft.game.id) { mutableStateOf("A:") }
         var initialization by remember(selected?.file?.name) { mutableStateOf(selected?.autoexec ?: "@ECHO OFF\r\n") }
+        var advanced by remember(selected?.file?.name) { mutableStateOf(selected?.builtin != true) }
         ModalBottomSheet(onDismissRequest = {
             if (!activity.isWorking()) { activity.discardDos(draft); dosDraft = null }
         }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
@@ -226,14 +227,20 @@ internal class LibraryUi(private val activity: MainActivity) {
                 Text("建立 DOS 游戏硬盘", style = MaterialTheme.typography.headlineSmall)
                 Text(draft.game.name, style = MaterialTheme.typography.titleMedium)
                 Text("${draft.entries.size} 个文件项目 · ${draft.bytes / 1048576} MB", style = MaterialTheme.typography.bodySmall)
-                if (dosTemplates.isNotEmpty()) SettingChoice("DOS HDI 模板", selected?.name ?: "选择模板", dosTemplates.map { it.name + " · " + it.info }) { templateId = dosTemplates[it].file.name }
-                OutlinedButton(onClick = { activity.chooseDosTemplate() }, enabled = !activity.isWorking()) { Text("导入 DOS 系统 HDI") }
-                selected?.let { Text(it.info, style = MaterialTheme.typography.bodySmall) }
+                if (dosTemplates.isNotEmpty()) SettingChoice("启动环境", selected?.name ?: "选择模板", dosTemplates.map { it.name + " · " + it.info }) { templateId = dosTemplates[it].file.name }
+                if (selected?.builtin == true) Text("已准备内置 DOS，将为这款游戏建立独立硬盘。", style = MaterialTheme.typography.bodySmall)
+                else OutlinedButton(onClick = { activity.chooseDosTemplate() }, enabled = !activity.isWorking()) { Text("导入 DOS 系统 HDI") }
+                if (selected?.builtin != true) selected?.let { Text(it.info, style = MaterialTheme.typography.bodySmall) }
                 SettingChoice("启动文件", entry, draft.executables) { index -> entry = draft.executables[index]; directory = entry.substringBeforeLast('/', "") }
+                TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "收起高级启动设置" else "高级启动设置") }
+                if (advanced) {
+                if (selected?.builtin == true) Text(selected.info, style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(directory, onValueChange = { directory = it }, label = { Text("工作目录 · 空值为游戏根目录") }, modifier = Modifier.fillMaxWidth())
                 SettingChoice("模板启动后的 DOS 盘符", drive, listOf("A:", "B:", "C:", "D:", "E:", "F:")) { drive = listOf("A:", "B:", "C:", "D:", "E:", "F:")[it] }
                 OutlinedTextField(initialization, onValueChange = { initialization = it }, label = { Text("DOS 初始化命令") }, minLines = 3, maxLines = 6, modifier = Modifier.fillMaxWidth())
                 Text("保留模板的驱动初始化命令，按需删除旧游戏的自启动命令。游戏启动入口会在初始化后执行。", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = { activity.chooseDosTemplate() }, enabled = !activity.isWorking()) { Text("使用其他 DOS 系统 HDI") }
+                }
                 if (dosError.isNotEmpty()) Text(dosError, color = MaterialTheme.colorScheme.error)
                 if (activity.isWorking()) LinearProgressIndicator(Modifier.fillMaxWidth())
                 Row(Modifier.fillMaxWidth().padding(bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {

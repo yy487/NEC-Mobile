@@ -686,15 +686,13 @@ int opna_sfload(POPNA opna, STFLAGH sfh, const SFENTRY *tbl)
 #if defined(SUPPORT_FMGEN)
 	if(statflag_read(sfh, &enable_fmgen, sizeof(enable_fmgen))==STATFLAG_SUCCESS){
 		if(enable_fmgen) {
-			OEMCHAR	path[MAX_PATH];
 			void* buf;
 
 			buf = malloc(fmgen_opnadata_size);
 			ret |= statflag_read(sfh, buf, fmgen_opnadata_size);
 			OPNA_DataLoad(opna->fmgen, buf);
 			free(buf);
-			getbiospath(path, "", NELEMENTS(path));
-			OPNA_LoadRhythmSample(opna->fmgen, path);
+			/* The initialized rhythm buffers are retained by OPNA_DataLoad. */
 		}
 	}
 #endif	/* SUPPORT_FMGEN */
