@@ -166,6 +166,8 @@ RETRO_API const char* necmobile_sound_rom(void)
 int necmobile_midi_enabled = 0;
 int necmobile_sound_bios_enabled = 1;
 int necmobile_font_kind = 0;
+unsigned int necmobile_mouse_reads = 0;
+RETRO_API unsigned int necmobile_mouse_read_count(void) { return necmobile_mouse_reads; }
 RETRO_API const char* necmobile_font_resource(void) {
    return necmobile_font_kind == 1 ? "FONT.BMP" : necmobile_font_kind == 2 ? "FONT.ROM" : "internal fallback";
 }
@@ -185,8 +187,10 @@ RETRO_API bool necmobile_check_state(const char* path)
 RETRO_API bool necmobile_load_state(const char* path)
 {
    int result;
+   extern void necmobile_clear_mouse_observation(void);
    if (!necmobile_check_state(path)) return false;
    result = statsave_load_d(path);
+   necmobile_clear_mouse_observation();
    return result >= 0 && !(result & (STATFLAG_VERSION | STATFLAG_VERCHG));
 }
 '''
@@ -227,6 +231,35 @@ if b'NEC Mobile: disconnected MIDI' not in data:
         raise ValueError('Expected MIDI output loop not found')
     source.write_bytes(data)
 print('NP2kai state result and MIDI bridge prepared')
+
+mouse_source = root / 'io/mouseif.c'
+mouse_data = mouse_source.read_bytes()
+if b'necmobile_mouse_parts' not in mouse_data:
+    mouse_newline = b'\r\n' if b'\r\n' in mouse_data else b'\n'
+    mouse_data = mouse_data.replace(b'\r\n', b'\n')
+    mouse_data = re.sub(rb'\r?\n#if defined\(__LIBRETRO__\)\s*extern unsigned int necmobile_mouse_reads;\s*\+\+necmobile_mouse_reads;\s*#endif', b'', mouse_data)
+    mouse_data = mouse_data.replace(b'static int mouseif_test = 0;', b'''static int mouseif_test = 0;
+#if defined(__LIBRETRO__)
+static unsigned int necmobile_mouse_parts;
+void necmobile_clear_mouse_observation(void) { necmobile_mouse_parts = 0; }
+#endif''', 1)
+    for needle in (b'void mouseif_sync(void) {', b'void mouseif_reset(const NP2CFG *pConfig) {'):
+        mouse_data = mouse_data.replace(needle, needle + b'\n#if defined(__LIBRETRO__)\n    necmobile_clear_mouse_observation();\n#endif', 1)
+    needle = b'portc = mouseif.upd8255.portc;\n\t\tif (portc & 0x80)'
+    replacement = b'''portc = mouseif.upd8255.portc;
+#if defined(__LIBRETRO__)
+        /* Count all four coordinate nibbles from one mouse sample. */
+        necmobile_mouse_parts |= 1u << ((portc >> 5) & 3);
+        if (necmobile_mouse_parts == 15) {
+            extern unsigned int necmobile_mouse_reads;
+            ++necmobile_mouse_reads;
+            necmobile_mouse_parts |= 16;
+        }
+#endif
+\t\tif (portc & 0x80)'''
+    if needle not in mouse_data: raise ValueError('PC-98 mouse coordinate entry not found')
+    mouse_data = mouse_data.replace(needle, replacement, 1)
+    mouse_source.write_bytes(mouse_data.replace(b'\n', mouse_newline))
 
 for name, kind in (('font/fontpc98.c', 1), ('font/fontv98.c', 2)):
     font_source = root / name

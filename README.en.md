@@ -42,7 +42,9 @@ The game card's **管理** menu provides renaming, machine and sound settings, d
 
 ## Controls
 
-Choose an input mode through **菜单 → 操作方式 / 鼠标**. PC-88 defaults to keyboard controls and PC-98 to the virtual mouse. The choice is saved per game.
+Choose automatic configuration, virtual mouse, or swipe keys through **菜单 → 操作方式 / 鼠标**. Automatic configuration uses an applied preset, then the previous control mode, with swipe keys as the initial default. Complete guest mouse transactions offer a **试用鼠标** suggestion. Tap it to select and remember mouse mode for this game. Tap the in-game control-mode button to switch, or hold it to open settings. A pending switch takes effect when the current touch ends.
+
+**操作预设** provides keypad or arrow controls with Enter/Space, a mouse touchpad, and text-command input. Recognized titles offer a preset suggestion for confirmation and association with the imported game.
 
 | Action | Result |
 | --- | --- |
@@ -53,7 +55,7 @@ Choose an input mode through **菜单 → 操作方式 / 鼠标**. PC-88 default
 | Use the bottom-left mouse buttons | Click or hold a button while sliding with another finger |
 | Tap 确认 / 空格 / 键盘 | Send Enter, send Space, or open the on-screen keyboard |
 
-In keyboard mode, tapping the game screen sends Enter. Use the on-screen keyboard for number choices and other keyboard controls. Choose automatic rotation, landscape, or portrait through **菜单 → 屏幕方向**.
+In swipe-key mode, each up/down/left/right gesture sends one keypad 2/4/6/8 or arrow key. A one-finger tap sends the selected Enter or Space key, and a two-finger tap sends the other confirmation key. Use the on-screen keyboard for number choices and other controls. Choose automatic rotation, landscape, or portrait through **菜单 → 屏幕方向**.
 
 The game pauses when the app moves to the background or loses audio focus. It resumes in the foreground once audio focus is available and manual pause is off. After headphones disconnect, select **继续运行** from the menu. To restart audio output manually, use **菜单 → 更多设置 → 恢复声音输出**.
 
@@ -104,11 +106,11 @@ TinySoundFont synthesizes General MIDI music using the selected SF2. PC-98 uses 
 
 ## PC-98 DOS folders
 
-Select **添加游戏 → DOS 游戏目录 / DOS 游戏 ZIP** in the PC-98 library. Import a DOS HDI template, choose the BAT/EXE/COM entry, working directory, and DOS drive letter. Keep the template's driver initialization commands and remove its previous game launch command before creating the disk.
+Select **添加游戏 → DOS 游戏目录 / DOS 游戏 ZIP** in the PC-98 library. From 0.26.4, the app provides a default DOS template. Confirm the BAT/EXE/COM entry and create the disk. The working directory, drive letter, initialization commands, and alternative templates are available in advanced startup settings.
 
-Each game gets a private writable HDI. Names must follow DOS 8.3 rules in code page 932. Incompatible names, collisions, or insufficient space stop the import. Templates can contain PC-98 FAT12/FAT16 partitions and must have IO.SYS, MSDOS.SYS, and COMMAND.COM. Supply your own DOS system disk. Export the game HDI through disk management to back up its in-game saves.
+Each game gets a private writable HDI. Names must follow DOS 8.3 rules in code page 932. Incompatible names, collisions, or insufficient space stop the import. Custom templates can contain PC-98 FAT12/FAT16 partitions and require IO.SYS, MSDOS.SYS, and COMMAND.COM. Export the game HDI through disk management to back up its in-game saves.
 
-Local builds with bundled DOS prepare the system template automatically. Confirm the game entry to create its disk; the working directory, DOS drive, initialization commands, and alternative templates are available in advanced startup settings.
+The bundled environment uses the MS-DOS 5.00 system template supplied for this project. The app creates a system copy for each game.
 
 ## Runtime resources
 
@@ -119,7 +121,7 @@ The APK includes the emulator cores and runtime libraries. Phones require Androi
 | Game disks, complete DOS folders, and game-specific drivers | Supplied by the player, including launch scripts and resident programs |
 | PC-88 BASIC, floppy, character, and kanji ROMs | Bundled for the six supported BASIC modes |
 | PC-98 compatible BIOS, standard font, and default sound BIOS | Supplied by the core and APK for the default configuration |
-| DOS system | Imported template in the public build; prepared automatically in local bundled-DOS builds |
+| DOS system | Bundled by default from 0.26.4, with support for importing alternative templates |
 | SF2 soundfont | Imported by the player when enabling MIDI |
 | Fonts for translations or custom character mappings | Supplied with the game; standard fonts are bundled |
 | Other sound BIOS, PC-88 dictionary, or expansion ROMs | Needed only by software or configurations that use them |
@@ -139,7 +141,7 @@ The build uses Gradle Wrapper 9.1.0, AGP 9.0.0, Kotlin/Compose compiler 2.2.10, 
 
 Restore the original `.cache/signing/development.jks` for an upgrade. For a new project, create your own RSA keystore at that path with alias `necmobile` and development password `android`. Private keys are excluded from source archives.
 
-For a local bundled-DOS build, supply a clean system template at `.cache/private-dos/dos/default.hdi.gz` and add `--bundle-dos` to the build command. The output is `NEC-Mobile-<version>-builtin-dos-arm64.apk`. System data stays local; ordinary builds retain template import.
+The default build packages the DOS template at `app/src/main/assets/dos/default.hdi.gz`.
 
 ### Source archive
 

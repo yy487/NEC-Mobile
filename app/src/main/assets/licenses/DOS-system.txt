@@ -1,0 +1,10 @@
+Bundled PC-98 DOS system template
+
+This template contains Microsoft MS-DOS 5.00 system files from the PC-98 disk
+image supplied for this project. It includes IO.SYS, MSDOS.SYS, COMMAND.COM,
+HIMEM.SYS, CONFIG.SYS and AUTOEXEC.BAT. The system binaries include their
+original copyright text.
+
+NEC Mobile supplies a system-only template with boot configuration for its
+per-game hard disks. The application copies the template into writable game
+storage before importing the game's files and startup script.

@@ -12,8 +12,15 @@
 
 static int mouseif_limitcounter = 0;
 static int mouseif_test = 0;
+#if defined(__LIBRETRO__)
+static unsigned int necmobile_mouse_parts;
+void necmobile_clear_mouse_observation(void) { necmobile_mouse_parts = 0; }
+#endif
 
 void mouseif_sync(void) {
+#if defined(__LIBRETRO__)
+    necmobile_clear_mouse_observation();
+#endif
 
 	// 前回の分を補正
 	mouseif.x += mouseif.rx;
@@ -222,6 +229,15 @@ static REG8 IOINPCALL mouseif_i7fd9(UINT port) {
 		ret |= 0x50;
 #endif
 		portc = mouseif.upd8255.portc;
+#if defined(__LIBRETRO__)
+        /* Count all four coordinate nibbles from one mouse sample. */
+        necmobile_mouse_parts |= 1u << ((portc >> 5) & 3);
+        if (necmobile_mouse_parts == 15) {
+            extern unsigned int necmobile_mouse_reads;
+            ++necmobile_mouse_reads;
+            necmobile_mouse_parts |= 16;
+        }
+#endif
 		if (portc & 0x80) {
 			x = mouseif.latch_x;
 			y = mouseif.latch_y;
@@ -303,6 +319,9 @@ static void IOOUTCALL mouseif_obfdb(UINT port, REG8 dat) {
 // ---- I/F
 
 void mouseif_reset(const NP2CFG *pConfig) {
+#if defined(__LIBRETRO__)
+    necmobile_clear_mouse_observation();
+#endif
 
 	ZeroMemory(&mouseif, sizeof(mouseif));
 	mouseif.upd8255.porta = 0x00;

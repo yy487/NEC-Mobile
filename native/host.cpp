@@ -34,6 +34,7 @@ std::atomic<bool> stopping{false}, paused{false};
 std::atomic<bool> frameReceived{false};
 std::atomic<bool> workerRunning{false};
 std::atomic<bool> audioDisconnected{false};
+std::atomic<bool> guestMouseActive{false};
 std::string status = "Ready";
 std::string startupWarning;
 std::string startupError;
@@ -63,7 +64,7 @@ std::array<int16_t, audioCapacity * 2> audioBuffer{};
 std::atomic<uint64_t> audioRead{0}, audioWrite{0};
 struct Command { int type, a = 0, b = 0, c = 0; std::string path; std::shared_ptr<std::promise<std::string>> result; };
 std::deque<Command> commands;
-enum { Key, Mouse, Mount, Flush, Reset, Pause, Resume, ReleaseKeys, MouseMode, ReopenAudio, SaveState, LoadState };
+enum { Key, Mouse, Mount, Flush, Reset, Pause, Resume, ReleaseKeys, ReopenAudio, SaveState, LoadState };
 
 void message(const char* text) {
     if (!text) return;
@@ -348,6 +349,7 @@ void run(int platform, std::string directory, std::string disk, std::string seco
             driveIndices = {firstIndex, secondIndex};
         }
         startState.store(2);
+        unsigned lastMouseReads = core->mouseReads ? core->mouseReads() : 0;
         auto next = std::chrono::steady_clock::now();
         auto lastFlush = next;
         while (!stopping.load()) {
@@ -369,11 +371,6 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                         for (size_t i = 0; i < buttonChanges.size(); ++i)
                             requestEdge(buttonChanges[i], (buttons & (1u << i)) != 0, (command.c & (1u << i)) != 0);
                     }
-                    break;
-                case MouseMode:
-                    releaseKeys();
-                    if (core->enableMouse(command.a != 0)) mouseEnabled = command.a != 0;
-                    else message("Mouse connection failed");
                     break;
                 case Mount: {
                     if (command.a < 0 || command.a > 1 || command.b < 0 || command.b >= 64) { message("Disk mount failed"); break; }
@@ -404,7 +401,10 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                     break;
                 }
                 case Flush: message(core->flush() ? "Disk changes flushed" : "Disk write failed"); break;
-                case Reset: releaseKeys(); midiSynth.reset(); core->reset(); message("Reset"); break;
+                case Reset:
+                    releaseKeys(); midiSynth.reset(); core->reset();
+                    lastMouseReads = core->mouseReads ? core->mouseReads() : 0;
+                    guestMouseActive.store(false); message("Reset"); break;
                 case Pause:
                     releaseKeys(); paused.store(true); closeAudio();
                     message(core->flush() ? "Paused" : "Paused; disk write failed"); break;
@@ -419,7 +419,11 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                         else if (!paused.load()) result="Pause the game before using a state slot";
                         else if (command.path.compare(0,directory.size()+8,directory+"/states/")!=0 || command.path.find("..")!=std::string::npos) result="Invalid state slot path";
                         else if (command.type==SaveState) { if (!saveSession(command.path)) result="State save failed; previous slot preserved"; }
-                        else result=restoreSession(command.path);
+                        else {
+                            result=restoreSession(command.path);
+                            lastMouseReads = core->mouseReads ? core->mouseReads() : 0;
+                            guestMouseActive.store(false);
+                        }
                     } catch (const std::exception&) { result="State operation failed"; }
                     if (command.result) command.result->set_value(result);
                     message(result.empty() ? (command.type==SaveState ? "State saved" : "State loaded") : result.c_str());
@@ -439,7 +443,9 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                 continue;
             }
             for (size_t i = 0; i < held.size(); ++i) {
-                bool state = sampleEdge(keyChanges[i], keyHoldFrames[i], held[i], 2, 1);
+                // Control taps must span the slower polling intervals in old game menus.
+                bool control = i == 13 || i == 32 || (i >= 256 && i <= 265) || (i >= 273 && i <= 276);
+                bool state = sampleEdge(keyChanges[i], keyHoldFrames[i], held[i], control ? 8 : 2, control ? 2 : 1);
                 if (state != held[i]) { held[i] = state; core->key(i, state); }
             }
             for (size_t i = 0; i < buttonChanges.size(); ++i) {
@@ -451,6 +457,11 @@ void run(int platform, std::string directory, std::string disk, std::string seco
             core->mouse(motionX, motionY, buttons);
             motionX = motionY = 0;
             core->frame();
+            if (core->mouseReads) {
+                unsigned reads = core->mouseReads();
+                if (reads != lastMouseReads) guestMouseActive.store(true);
+                lastMouseReads = reads;
+            }
             now = std::chrono::steady_clock::now();
             if (now - lastFlush > std::chrono::seconds(2)) {
                 if (!core->flush()) message("Disk write failed");
@@ -495,7 +506,7 @@ std::string string(JNIEnv* env, jstring value) {
 
 extern "C" JNIEXPORT jboolean JNICALL Java_org_necmobile_Native_start(JNIEnv* env, jclass, jint platform, jstring dir, jstring disk, jstring secondDisk, jint mode, jint firstIndex, jint secondIndex, jboolean mouseEnabled) {
     if (worker.joinable()) return false;
-    stopping.store(false); paused.store(true); frameReceived.store(false);
+    stopping.store(false); paused.store(true); frameReceived.store(false); guestMouseActive.store(false);
     workerRunning.store(true);
     { std::lock_guard<std::mutex> lock(commandMutex); commands.clear(); }
     { std::lock_guard<std::mutex> lock(statusMutex); driveMedia = {}; driveIndices = {}; startupWarning.clear(); startupError.clear(); machineInfo.clear(); }
@@ -511,7 +522,6 @@ extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_surface(JNIEnv* env,
 }
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_key(JNIEnv*, jclass, jint key, jboolean down) { enqueue({Key, key, down}); }
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_mouse(JNIEnv*, jclass, jint x, jint y, jint buttons) { enqueue({Mouse, x, y, buttons}); }
-extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_mouseMode(JNIEnv*, jclass, jboolean enabled) { enqueue({MouseMode, enabled}); }
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_pause(JNIEnv*, jclass, jboolean value) { enqueue({value ? Pause : Resume}); }
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_flush(JNIEnv*, jclass) { enqueue({Flush}); }
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_audioChanged(JNIEnv*, jclass) { enqueue({ReopenAudio}); }
@@ -548,6 +558,7 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_takeStartupWarnin
     return result;
 }
 extern "C" JNIEXPORT jint JNICALL Java_org_necmobile_Native_startState(JNIEnv*, jclass) { return startState.load(); }
+extern "C" JNIEXPORT jboolean JNICALL Java_org_necmobile_Native_mouseActivity(JNIEnv*, jclass) { return guestMouseActive.load(); }
 extern "C" JNIEXPORT jint JNICALL Java_org_necmobile_Native_videoGeometry(JNIEnv*, jclass) { return videoGeometry.load(); }
 extern "C" JNIEXPORT jint JNICALL Java_org_necmobile_Native_audioDevice(JNIEnv*, jclass) { return outputDevice.load(); }
 extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_audioInfo(JNIEnv* env, jclass) {

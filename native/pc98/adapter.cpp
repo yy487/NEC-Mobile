@@ -31,6 +31,7 @@ static void (*configureMidi)(bool);
 static void (*configureSoundBios)(bool);
 static const char* (*soundRomName)();
 static const char* (*fontResource)();
+static unsigned (*readMouseCounter)();
 static void (*completeMedia)();
 static const char* (*floppyPath)(unsigned);
 static NecHost host{};
@@ -196,6 +197,7 @@ static void closeCore() {
     saveMachine = checkMachine = loadMachine = nullptr; configureMidi = nullptr; configureSoundBios = nullptr; soundRomName = nullptr;
     completeMedia = nullptr; floppyPath = nullptr;
     fontResource = nullptr;
+    readMouseCounter = nullptr;
     loaded = initialized = false;
     disks = {};
     media.clear();
@@ -237,9 +239,10 @@ static bool openCore(const char* directory, const char* disk, const char* second
     configureSoundBios = reinterpret_cast<decltype(configureSoundBios)>(dlsym(library,"necmobile_configure_sound_bios"));
     soundRomName = reinterpret_cast<decltype(soundRomName)>(dlsym(library,"necmobile_sound_rom"));
     fontResource = reinterpret_cast<decltype(fontResource)>(dlsym(library,"necmobile_font_resource"));
+    readMouseCounter = reinterpret_cast<decltype(readMouseCounter)>(dlsym(library,"necmobile_mouse_read_count"));
     completeMedia = reinterpret_cast<decltype(completeMedia)>(dlsym(library,"necmobile_complete_media"));
     floppyPath = reinterpret_cast<decltype(floppyPath)>(dlsym(library,"necmobile_floppy_path"));
-    if (!saveMachine || !checkMachine || !loadMachine || !configureMidi || !configureSoundBios || !soundRomName || !fontResource || !completeMedia || !floppyPath) {
+    if (!saveMachine || !checkMachine || !loadMachine || !configureMidi || !configureSoundBios || !soundRomName || !fontResource || !completeMedia || !floppyPath || !readMouseCounter) {
         host.message("PC-98 core bridge missing"); closeCore(); return false;
     }
     configureMidi(midiEnabled);
@@ -307,11 +310,12 @@ static bool mount(int drive, const char* path, int index) {
 static void reset() { keys.fill(false); p_retro_reset(); }
 static double fps() { return refresh; }
 static bool enableMouse(bool) { return true; }
+static unsigned mouseReads() { return readMouseCounter ? readMouseCounter() : 0; }
 static const char* diskPath(int drive) { return floppyPath && drive >= 0 && drive < 2 ? floppyPath(drive) : ""; }
 static bool saveState(const char* path) { return saveMachine && saveMachine(path); }
 static bool checkState(const char* path) { return checkMachine && checkMachine(path); }
 static bool loadState(const char* path) { if (!loadMachine || !loadMachine(path)) return false; keys.fill(false); mouseX=mouseY=polledX=polledY=0; mouseButtons=0; return true; }
 extern "C" const NecCore* nec_core() {
-    static const NecCore api{"NP2kai / PC-98", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, diskPath};
+    static const NecCore api{"NP2kai / PC-98", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, diskPath, mouseReads};
     return &api;
 }

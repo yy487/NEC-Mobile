@@ -23,10 +23,19 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private ScrollView controls;
     private LinearLayout mouseDock;
     private MousePad mousePad;
+    private SwipeKeys swipeKeys;
     private final List<Button> mouseKeys = new ArrayList<>();
     private final Runnable holdMouse = () -> { if (mouseAllowed()) mousePad.longPress(); };
     private boolean mouseEnabled;
-    private String mousePreference;
+    private String inputPreference;
+    private static final int INPUT_AUTO = 0, INPUT_MOUSE = 1, INPUT_KEYS = 2;
+    private int inputMode, tapKey;
+    private int automaticInput, pendingInput = -1, touchPointers;
+    private boolean mouseSuggested;
+    private Button inputSwitch;
+    private final Set<View> touchedKeys = new HashSet<>();
+    private InputPresets.Preset inputPreset, suggestedPreset;
+    private boolean keypadDirections;
     private int gestureButtons, mouseSpeed;
     private boolean fullKeyboard, userPaused, resumed, closing, nativeStarted;
     private final Map<String,String> mediaNames = new HashMap<>();
@@ -57,6 +66,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private final Runnable statusUpdate = new Runnable() {
         @Override public void run() {
             if (closing) return;
+            updateInputMode();
             int startup = Native.startState();
             if (!startupReported && startup == 2 && !resumeLoading) {
                 if (getIntent().getBooleanExtra("continueSession", false)) {
@@ -110,11 +120,22 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
         platform = getIntent().getIntExtra("platform", 88);
-        mousePreference = "mouse." + getIntent().getStringExtra("gameId") + "." + platform;
-        mouseEnabled = getSharedPreferences("player", MODE_PRIVATE).getBoolean(mousePreference, platform == 98);
+        String legacyMousePreference = "mouse." + getIntent().getStringExtra("gameId") + "." + platform;
+        inputPreference = "input." + getIntent().getStringExtra("gameId") + "." + platform;
+        android.content.SharedPreferences input = getSharedPreferences("player", MODE_PRIVATE);
+        int previousMode = input.contains(legacyMousePreference) ? (input.getBoolean(legacyMousePreference, false) ? INPUT_MOUSE : INPUT_KEYS) : INPUT_AUTO;
+        inputMode = Math.max(INPUT_AUTO, Math.min(INPUT_KEYS, input.getInt(inputPreference, previousMode)));
+        tapKey = input.getInt(inputPreference + ".tap", 13) == 32 ? 32 : 13;
+        keypadDirections = input.getBoolean(inputPreference + ".keypad", true);
+        inputPreset = InputPresets.find(input.getString(inputPreference + ".preset", ""));
+        automaticInput = inputPreset == null ? input.getInt(inputPreference + ".last", INPUT_KEYS) : inputPreset.mouse ? INPUT_MOUSE : INPUT_KEYS;
+        automaticInput = automaticInput == INPUT_MOUSE ? INPUT_MOUSE : INPUT_KEYS;
+        mouseEnabled = (inputMode == INPUT_AUTO ? automaticInput : inputMode) == INPUT_MOUSE;
+        fullKeyboard = input.getBoolean(inputPreference + ".fullKeyboard", false);
         mouseSpeed = Math.max(0, Math.min(2, getSharedPreferences("player", MODE_PRIVATE).getInt("mouseSpeed", 1)));
         gameName = getIntent().getStringExtra("gameName");
         if (gameName == null) gameName = "PC-" + platform;
+        suggestedPreset = InputPresets.candidate(platform, gameName);
         try {
             String id = getIntent().getStringExtra("gameId");
             GameLibrary.Game game = id == null ? null : new GameLibrary(this, platform).find(id);
@@ -155,14 +176,20 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         surface.setFocusable(true); surface.setFocusableInTouchMode(true);
         screen.addView(surface, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         root.addView(screen, new FrameLayout.LayoutParams(-1, -1));
+        swipeKeys = new SwipeKeys(24, code -> { Native.key(code, true); Native.key(code, false); });
+        swipeKeys.keypad(keypadDirections);
         mousePad = new MousePad(ViewConfiguration.get(this).getScaledTouchSlop(), new MousePad.Sink() {
-            public void move(int x, int y) { if (mouseAllowed()) Native.mouse(x, y, mouseButtons | gestureButtons); }
+            public void move(int x, int y) {
+                if (mouseAllowed()) Native.mouse(x, y, mouseButtons | gestureButtons);
+                else if (touchKeysAllowed()) swipeKeys.move(x, y);
+            }
             public void buttons(int mask) { gestureButtons = mask; if (mouseAllowed()) Native.mouse(0, 0, mouseButtons | gestureButtons); }
             public void click(int mask) {
                 if (mouseAllowed()) {
                     clickMouse(mask);
-                } else if (!mouseEnabled && mask == 1 && nativeStarted && !closing) {
-                    Native.key(13, true); Native.key(13, false);
+                } else if (touchKeysAllowed()) {
+                    int code = mask == 2 ? (tapKey == 13 ? 32 : 13) : tapKey;
+                    Native.key(code, true); Native.key(code, false);
                 }
             }
         });
@@ -178,9 +205,13 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         controls.setBackground(Ui.background(0xe010151f, Ui.dp(this, 12)));
         controls.setVisibility(View.GONE); root.addView(controls);
         LinearLayout toolbar = Ui.row(this); toolbar.setAlpha(0.86f);
-        toolbar.addView(key("确认", 13, false), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
+        toolbar.addView(key("Enter", 13, false), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
         if (platform == 88) toolbar.addView(key("空格", 32, false), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
         toolbar.addView(Ui.button(this, "键盘", this::toggleKeyboard), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
+        inputSwitch = Ui.button(this, "按键", () -> requestInputMode(mouseEnabled ? INPUT_KEYS : INPUT_MOUSE));
+        inputSwitch.setTextSize(12);
+        inputSwitch.setOnLongClickListener(view -> { inputSettings(); return true; });
+        toolbar.addView(inputSwitch, new LinearLayout.LayoutParams(Ui.dp(this, 80), Ui.dp(this, 38)));
         toolbar.addView(Ui.button(this, "菜单", this::menu), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
         FrameLayout.LayoutParams bar = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
         bar.setMargins(Ui.dp(this, 6), Ui.dp(this, 6), Ui.dp(this, 6), Ui.dp(this, 6)); root.addView(toolbar, bar);
@@ -198,17 +229,19 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                         touchClick[0] = true; view.performClick(); touchClick[0] = false;
                     }
                 }
-                Native.mouse(0, 0, mouseButtons | gestureButtons); return true;
+                Native.mouse(0, 0, mouseButtons | gestureButtons);
+                applyPendingInput(); refreshInputButton(); return true;
             });
             mouseKeys.add(button); mouseDock.addView(button, new LinearLayout.LayoutParams(Ui.dp(this, 56), Ui.dp(this, 38)));
         }
         mouseDock.setAlpha(0.86f); mouseDock.setVisibility(mouseEnabled ? View.VISIBLE : View.GONE); root.addView(mouseDock);
         layoutPlayer();
         buildKeyboard();
+        refreshInputButton();
         setContentView(root); immersive();
         try {
             nativeStarted = Native.start(platform, getIntent().getStringExtra("directory"), getIntent().getStringExtra("disk"), getIntent().getStringExtra("secondDisk"),
-                    getIntent().getIntExtra("mode", 0), getIntent().getIntExtra("firstIndex", 0), getIntent().getIntExtra("secondIndex", 0), mouseEnabled);
+                    getIntent().getIntExtra("mode", 0), getIntent().getIntExtra("firstIndex", 0), getIntent().getIntExtra("secondIndex", 0), true);
             if (!nativeStarted) throw new IllegalStateException("已有运行中的内核");
             handler.post(statusUpdate);
         } catch (Throwable error) {
@@ -229,18 +262,74 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         applyPause();
     }
     private boolean mouseAllowed() { return mouseEnabled && nativeStarted && resumed && !closing && !appliedPause && !stateBusy; }
+    private boolean touchKeysAllowed() { return !mouseEnabled && nativeStarted && resumed && !closing && !appliedPause && !stateBusy; }
+    private void updateInputMode() {
+        if (!nativeStarted || closing) return;
+        mouseSuggested = inputMode == INPUT_AUTO && inputPreset == null && suggestedPreset == null && !mouseEnabled && Native.mouseActivity();
+        applyPendingInput();
+        refreshInputButton();
+    }
+    private void refreshInputButton() {
+        if (inputSwitch == null) return;
+        String label = pendingInput >= 0 ? "待切换" : mouseEnabled ? "鼠标" : mouseSuggested ? "试用鼠标" : "按键";
+        String description = "当前" + (mouseEnabled ? "鼠标" : "滑动按键") + "，点击切换，长按设置";
+        if (!android.text.TextUtils.equals(label, inputSwitch.getText())) inputSwitch.setText(label);
+        if (!android.text.TextUtils.equals(description, inputSwitch.getContentDescription())) inputSwitch.setContentDescription(description);
+    }
+    private void requestInputMode(int mode) {
+        inputMode = mode;
+        int target = mode == INPUT_AUTO ? automaticInput : mode;
+        getSharedPreferences("player", MODE_PRIVATE).edit().putInt(inputPreference, mode).apply();
+        pendingInput = target;
+        applyPendingInput();
+        refreshInputButton();
+    }
+    private void applyPendingInput() {
+        if (pendingInput < 0 || touchPointers > 0 || mouseButtons != 0 || gestureButtons != 0 || !touchedKeys.isEmpty()) return;
+        int target = pendingInput;
+        pendingInput = -1;
+        cancelMouse();
+        if (nativeStarted) Native.releaseKeys();
+        for (Button modifier : modifiers) { modifier.setSelected(false); modifier.setTextColor(Color.WHITE); }
+        mouseEnabled = target == INPUT_MOUSE;
+        if (inputPreset == null) automaticInput = target;
+        mouseSuggested = false;
+        getSharedPreferences("player", MODE_PRIVATE).edit().putInt(inputPreference + ".last", target).apply();
+        mouseDock.setVisibility(mouseEnabled && controls.getVisibility() != View.VISIBLE ? View.VISIBLE : View.GONE);
+    }
+    private void inputPresets() {
+        List<InputPresets.Preset> choices = new ArrayList<>(Arrays.asList(InputPresets.ALL));
+        if (suggestedPreset != null) { choices.remove(suggestedPreset); choices.add(0, suggestedPreset); }
+        String[] names = choices.stream().map(preset -> preset.title + (preset == suggestedPreset ? " · 本游戏建议" : "")).toArray(String[]::new);
+        dialog().setTitle("操作预设").setItems(names, (picker, index) -> {
+            inputPreset = choices.get(index);
+            tapKey = inputPreset.tap;
+            keypadDirections = inputPreset.keypad;
+            fullKeyboard = inputPreset.fullKeyboard;
+            automaticInput = inputPreset.mouse ? INPUT_MOUSE : INPUT_KEYS;
+            getSharedPreferences("player", MODE_PRIVATE).edit().putString(inputPreference + ".preset", inputPreset.id)
+                    .putInt(inputPreference + ".tap", tapKey).putBoolean(inputPreference + ".keypad", keypadDirections)
+                    .putBoolean(inputPreference + ".fullKeyboard", fullKeyboard).apply();
+            swipeKeys.keypad(keypadDirections);
+            buildKeyboard();
+            requestInputMode(INPUT_AUTO);
+        }).setNegativeButton("返回", null).show();
+    }
     private void clickMouse(int mask) {
         Native.mouse(0, 0, mouseButtons | gestureButtons | mask); Native.mouse(0, 0, mouseButtons | gestureButtons);
     }
     private boolean padTouch(View view, MotionEvent event) {
         if (closing || !nativeStarted || appliedPause || stateBusy) return true;
         int action = event.getActionMasked(), pointer = event.getActionIndex();
-        float speed = new float[]{0.6f, 1f, 1.6f}[mouseSpeed];
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) touchPointers = event.getPointerCount();
+        float speed = mouseEnabled ? new float[]{0.6f, 1f, 1.6f}[mouseSpeed] : 1f;
         if (action == MotionEvent.ACTION_DOWN) {
+            swipeKeys.reset();
             mousePad.down(event.getPointerId(0), event.getX(), event.getY(), event.getEventTime(),
                     speed * 640f / Math.max(1, surface.getWidth()), speed * 400f / Math.max(1, surface.getHeight()));
             if (mouseEnabled) handler.postDelayed(holdMouse, 350);
         } else if (action == MotionEvent.ACTION_POINTER_DOWN) {
+            swipeKeys.reset();
             handler.removeCallbacks(holdMouse);
             mousePad.another(event.getPointerId(pointer), event.getX(pointer), event.getY(pointer));
         } else if (action == MotionEvent.ACTION_MOVE) {
@@ -250,29 +339,43 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) {
             handler.removeCallbacks(holdMouse);
             mousePad.up(event.getPointerId(pointer), event.getX(pointer), event.getY(pointer), event.getEventTime(), action == MotionEvent.ACTION_UP);
+            if (action == MotionEvent.ACTION_UP) swipeKeys.reset();
             if (action == MotionEvent.ACTION_UP) view.performClick();
+            touchPointers = action == MotionEvent.ACTION_UP ? 0 : event.getPointerCount() - 1;
+            applyPendingInput(); refreshInputButton();
         } else if (action == MotionEvent.ACTION_CANCEL) cancelMouse();
         return true;
     }
     private void cancelMouse() {
         handler.removeCallbacks(holdMouse);
         if (mousePad != null) mousePad.cancel();
+        if (swipeKeys != null) swipeKeys.reset();
         mouseButtons = gestureButtons = 0;
+        touchPointers = 0;
         for (Button button : mouseKeys) button.setPressed(false);
         if (nativeStarted) Native.mouse(0, 0, 0);
     }
     private void inputSettings() {
-        dialog().setTitle("操作方式").setItems(new String[]{"虚拟鼠标（触控板）", "按键操作（轻触确认）", "鼠标速度", "操作说明"}, (dialog, choice) -> {
-            if (choice < 2) {
-                cancelMouse(); Native.releaseKeys();
-                mouseEnabled = choice == 0;
-                getSharedPreferences("player", MODE_PRIVATE).edit().putBoolean(mousePreference, mouseEnabled).apply();
-                mouseDock.setVisibility(mouseEnabled ? View.VISIBLE : View.GONE); Native.mouseMode(mouseEnabled);
-                Toast.makeText(this, mouseEnabled ? "滑动移动 · 轻触左击 · 双指右击 · 长按拖动" : "使用数字、空格及确认操作", Toast.LENGTH_LONG).show();
-            } else if (choice == 2) dialog().setTitle("鼠标速度").setSingleChoiceItems(new String[]{"慢速", "标准", "快速"}, mouseSpeed, (picker, speed) -> {
+        String auto = inputMode == INPUT_AUTO ? "自动配置 · 当前" + (mouseEnabled ? "鼠标" : "滑动按键") : "自动配置";
+        String mouse = "虚拟鼠标（触控板）" + (inputMode == INPUT_MOUSE ? " · 已选" : "");
+        String keys = "滑动按键" + (inputMode == INPUT_KEYS ? " · 已选" : "");
+        dialog().setTitle("操作方式").setItems(new String[]{auto, mouse, keys, "轻触确认键 · " + (tapKey == 13 ? "Enter" : "空格"),
+                "滑动键位 · " + (keypadDirections ? "小键盘 2/4/6/8" : "方向键"), "鼠标速度", "操作预设" + (inputPreset == null ? "" : " · " + inputPreset.title), "操作说明"}, (dialog, choice) -> {
+            if (choice <= 2) {
+                requestInputMode(choice);
+            } else if (choice == 3) dialog().setTitle("轻触确认键").setSingleChoiceItems(new String[]{"Enter", "空格"}, tapKey == 13 ? 0 : 1, (picker, key) -> {
+                tapKey = key == 0 ? 13 : 32;
+                getSharedPreferences("player", MODE_PRIVATE).edit().putInt(inputPreference + ".tap", tapKey).apply(); picker.dismiss();
+            }).setNegativeButton("返回", null).show();
+            else if (choice == 4) dialog().setTitle("滑动键位").setSingleChoiceItems(new String[]{"小键盘 2/4/6/8", "方向键 ↑↓←→"}, keypadDirections ? 0 : 1, (picker, layout) -> {
+                keypadDirections = layout == 0; swipeKeys.keypad(keypadDirections);
+                getSharedPreferences("player", MODE_PRIVATE).edit().putBoolean(inputPreference + ".keypad", keypadDirections).apply(); picker.dismiss();
+            }).setNegativeButton("返回", null).show();
+            else if (choice == 5) dialog().setTitle("鼠标速度").setSingleChoiceItems(new String[]{"慢速", "标准", "快速"}, mouseSpeed, (picker, speed) -> {
                 mouseSpeed = speed; getSharedPreferences("player", MODE_PRIVATE).edit().putInt("mouseSpeed", speed).apply(); picker.dismiss();
             }).setNegativeButton("返回", null).show();
-            else dialog().setTitle("虚拟鼠标").setMessage("在屏幕任意空白处或游戏画面上滑动，控制游戏自己的鼠标光标；抬手后可换位置继续滑动。\n\n轻触：左键点击\n双指轻触：右键点击\n长按后滑动：按住左键拖动\n左下角左右键：可直接点击，也可按住配合另一只手滑动。\n\n游戏需要支持鼠标；轻井泽等键盘游戏请用按键模式。")
+            else if (choice == 6) inputPresets();
+            else dialog().setTitle("触屏操作").setMessage("自动配置优先使用已套用的操作预设，其次沿用上次操作方式，首次使用滑动按键。检测到完整鼠标通信时，快捷按钮提供试用鼠标建议，点击后按游戏记住选择。标题匹配的预设可在操作预设中确认套用。\n\n滑动按键\n每次上、下、左、右滑动触发一个对应方向。单指轻触发送所选确认键，双指轻触发送另一确认键。\n\n虚拟鼠标\n滑动移动光标，轻触左击，双指右击，长按拖动。左右键按钮可按住配合滑动。\n\n点击运行界面的按键／鼠标按钮可切换，长按打开操作设置。切换在当前触摸结束后生效。")
                     .setPositiveButton("知道了", null).show();
         }).setNegativeButton("返回游戏", null).show();
     }
@@ -291,10 +394,12 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             button.setOnTouchListener((view, event) -> {
                 if (closing) return true;
                 int action = event.getActionMasked();
-                if (action == MotionEvent.ACTION_DOWN) { Native.key(code, true); view.setPressed(true); }
+                if (action == MotionEvent.ACTION_DOWN) { touchedKeys.add(view); Native.key(code, true); view.setPressed(true); }
                 if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                    touchedKeys.remove(view);
                     Native.key(code, false); view.setPressed(false);
                     if (action == MotionEvent.ACTION_UP) view.performClick();
+                    applyPendingInput(); refreshInputButton();
                 }
                 return true;
             });
@@ -319,6 +424,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private void buildKeyboard() {
         cancelMouse();
         keyboard.removeAllViews(); modifiers.clear();
+        touchedKeys.clear();
         Native.releaseKeys();
         if (fullKeyboard) {
             letters("1234567890"); letters("qwertyuiop"); letters("asdfghjkl"); letters("zxcvbnm");
@@ -341,6 +447,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         if (!nativeStarted || closing) return;
         boolean shouldPause = userPaused || !resumed || !focusGranted || openDialogs > 0 || stateBusy || autoSaving || !startupReported || startupFailed;
         if (shouldPause != appliedPause) { Native.pause(shouldPause); appliedPause = shouldPause; }
+        if (shouldPause) { touchedKeys.clear(); applyPendingInput(); refreshInputButton(); }
         if (!shouldPause) everRunning = true;
         for (Button modifier : modifiers) { modifier.setSelected(false); modifier.setTextColor(Color.WHITE); }
     }
@@ -540,7 +647,8 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private void toggleKeyboard() {
         cancelMouse();
         controls.setVisibility(controls.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
-        if (controls.getVisibility() != View.VISIBLE) Native.releaseKeys();
+        mouseDock.setVisibility(mouseEnabled && controls.getVisibility() != View.VISIBLE ? View.VISIBLE : View.GONE);
+        if (controls.getVisibility() != View.VISIBLE) { touchedKeys.clear(); Native.releaseKeys(); }
         for (Button modifier : modifiers) { modifier.setSelected(false); modifier.setTextColor(Color.WHITE); }
     }
     private void immersive() {

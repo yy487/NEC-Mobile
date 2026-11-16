@@ -45,6 +45,24 @@ bool PC8801::Sound::ResetAfterState()
             newline = b'\r\n' if b'\r\n' in changed else b'\n'
             changed = changed.replace(b'pc = pc88;', b'pc = pc88;' + newline +
                 b'\tmove.x = move.y = 0; port40 = 0; phase = 0; triggertime = 0; data = -1;')
+        if path.name == 'mouse.cpp' and b'androidMouseParts' not in changed:
+            changed = re.sub(rb'if \(int\(pc->GetTime\(\) - triggertime\) <= 18\*4\) \{\s*extern unsigned AndroidMouseReads;\s*\+\+AndroidMouseReads;\s*\}\s*', b'', changed)
+            changed = changed.replace(b'using namespace PC8801;', b'''using namespace PC8801;
+static unsigned androidMouseParts;
+static bool androidMouseActive;''', 1)
+            changed = changed.replace(b'pc = pc88;', b'pc = pc88; androidMouseParts = 0; androidMouseActive = false;', 1)
+            changed = changed.replace(b'switch (phase & 3)', b'''// An idle mouse shares the joystick port and must leave its lines high.
+        int elapsed = int(pc->GetTime() - triggertime);
+        if (!androidMouseActive || elapsed < 0 || elapsed > 18*4) return 0xff;
+        androidMouseParts |= 1u << ((phase + 3) & 3);
+        if (androidMouseParts == 15) {
+            extern unsigned AndroidMouseReads;
+            ++AndroidMouseReads;
+            androidMouseParts |= 16;
+        }
+        switch (phase & 3)''', 1)
+            changed = changed.replace(b'triggertime = pc->GetTime();', b'triggertime = pc->GetTime(); androidMouseParts = 0; androidMouseActive = true;', 1)
+            if b'androidMouseParts == 15' not in changed: raise ValueError('M88 mouse protocol entry not found')
         if path.name == 'pc88.cpp':
             changed = changed.replace(b'{ 0x50, IOBus::portin,  CRTC::getstatus }', b'{ 0x51, IOBus::portin,  CRTC::getstatus }')
             changed = changed.replace(b'{ 0x51, IOBus::portin,  CRTC::in }', b'{ 0x50, IOBus::portin,  CRTC::in }')

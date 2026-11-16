@@ -17,6 +17,8 @@
 #include "diag.h"
 
 using namespace PC8801;
+static unsigned androidMouseParts;
+static bool androidMouseActive;
 
 // ---------------------------------------------------------------------------
 //	\’z
@@ -36,7 +38,7 @@ Mouse::~Mouse()
 //
 bool Mouse::Init(PC88* pc88)
 {
-	pc = pc88;
+	pc = pc88; androidMouseParts = 0; androidMouseActive = false;
 	move.x = move.y = 0; port40 = 0; phase = 0; triggertime = 0; data = -1;
 	return true;
 }
@@ -73,7 +75,16 @@ uint IOCALL Mouse::GetMove(uint)
 	}
 	else
 	{
-		switch (phase & 3)
+		// An idle mouse shares the joystick port and must leave its lines high.
+        int elapsed = int(pc->GetTime() - triggertime);
+        if (!androidMouseActive || elapsed < 0 || elapsed > 18*4) return 0xff;
+        androidMouseParts |= 1u << ((phase + 3) & 3);
+        if (androidMouseParts == 15) {
+            extern unsigned AndroidMouseReads;
+            ++AndroidMouseReads;
+            androidMouseParts |= 16;
+        }
+        switch (phase & 3)
 		{
 		case 1:	// x
 			return (move.x >> 4) | 0xf0;
@@ -111,7 +122,7 @@ void IOCALL Mouse::Strobe(uint, uint data)
 		{
 			if (data)
 			{
-				triggertime = pc->GetTime();
+				triggertime = pc->GetTime(); androidMouseParts = 0; androidMouseActive = true;
 				if (ui)
 					ui->GetMovement(&move);
 				else

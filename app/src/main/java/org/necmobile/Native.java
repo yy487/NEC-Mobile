@@ -8,7 +8,6 @@ final class Native {
     static native void surface(Surface surface);
     static native void key(int code, boolean down);
     static native void mouse(int dx, int dy, int buttons);
-    static native void mouseMode(boolean enabled);
     static native void pause(boolean paused);
     static native void flush();
     static native void audioChanged();
@@ -22,6 +21,7 @@ final class Native {
     static native String status();
     static native String takeStartupWarning();
     static native int startState();
+    static native boolean mouseActivity();
     static native String startError();
     static native String machineInfo();
     static native String audioInfo();

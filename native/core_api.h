@@ -27,6 +27,8 @@ struct NecCore {
     bool (*checkState)(const char* path);
     bool (*loadState)(const char* path);
     const char* (*diskPath)(int drive);
+    // Complete guest mouse transactions, used for suggestions rather than input routing.
+    unsigned (*mouseReads)();
 };
 
 extern "C" __attribute__((visibility("default"))) const NecCore* nec_core();

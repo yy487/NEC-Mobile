@@ -1952,6 +1952,8 @@ RETRO_API const char* necmobile_sound_rom(void)
 int necmobile_midi_enabled = 0;
 int necmobile_sound_bios_enabled = 1;
 int necmobile_font_kind = 0;
+unsigned int necmobile_mouse_reads = 0;
+RETRO_API unsigned int necmobile_mouse_read_count(void) { return necmobile_mouse_reads; }
 RETRO_API const char* necmobile_font_resource(void) {
    return necmobile_font_kind == 1 ? "FONT.BMP" : necmobile_font_kind == 2 ? "FONT.ROM" : "internal fallback";
 }
@@ -1971,7 +1973,9 @@ RETRO_API bool necmobile_check_state(const char* path)
 RETRO_API bool necmobile_load_state(const char* path)
 {
    int result;
+   extern void necmobile_clear_mouse_observation(void);
    if (!necmobile_check_state(path)) return false;
    result = statsave_load_d(path);
+   necmobile_clear_mouse_observation();
    return result >= 0 && !(result & (STATFLAG_VERSION | STATFLAG_VERCHG));
 }

@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 NecHost m88host{};
+namespace PC8801 { unsigned AndroidMouseReads = 0; }
 
 class AndroidDraw final : public Draw {
     std::vector<uint8_t> indexed;
@@ -137,6 +138,7 @@ public:
         mouseEnabled = enabled; return true;
     }
     void mouse(int dx, int dy, unsigned buttons) { mouseInput.inject(dx, dy, buttons); }
+    void resetMouse() { if (mouseEnabled) mouseDevice.Init(this); }
     bool snapshot(std::vector<uint8_t>& bytes) {
         bytes.assign(devlist.GetStatusSize(),0);
         return devlist.SaveStatus(bytes.data());
@@ -237,6 +239,7 @@ static bool hasRom(const char* name, int size) {
 }
 static bool openCore(const char* directory, const char* disk, const char* secondDisk, int mode, NecHost host) {
     closeCore();
+    PC8801::AndroidMouseReads = 0;
     m88host = host;
     requestedMode = mode >= 0 && size_t(mode) < std::size(basicModes) ? basicModes[mode] : basicModes[0];
     machineConfig=readMachineConfig(directory);
@@ -303,12 +306,13 @@ static void frame() {
 static void key(int code, bool pressed) { if (keyboard) keyboard->key(code, pressed); }
 static void mouse(int dx, int dy, unsigned buttons) { if (machine) machine->mouse(dx, dy, buttons); }
 static bool enableMouse(bool enabled) { return machine && machine->enableMouse(enabled); }
+static unsigned mouseReads() { return PC8801::AndroidMouseReads; }
 static bool mount(int drive, const char* path, int index) {
     if (!disks || drive < 0 || drive > 1 || index < 0 || index >= 64 || !flush()) return false;
     if (!*path) return disks->Unmount(drive);
     return disks->Mount(drive, path, false, index, false);
 }
-static void reset() { keyboard->rows.fill(255); sound->BeginStateLoad(); machine->Reset(); sound->ResetAfterState(); }
+static void reset() { keyboard->rows.fill(255); sound->BeginStateLoad(); machine->Reset(); machine->resetMouse(); sound->ResetAfterState(); }
 namespace PC8801 { void AndroidMidiByte(uint8_t byte) { if (m88host.midi) m88host.midi(byte); } }
 static bool saveState(const char* path) {
     std::vector<uint8_t> data;
@@ -323,11 +327,12 @@ static bool loadState(const char* path) {
     if (!machine || !readStateFile(path,data,16*1024*1024) || !machine->checkSnapshot(data)) return false;
     sound->BeginStateLoad();
     bool restored=machine->restore(data);
+    machine->resetMouse();
     bool audioRestored=sound->ResetAfterState();
     keyboard->rows.fill(255); sampleRemainder=0;
     return restored && audioRestored;
 }
 extern "C" const NecCore* nec_core() {
-    static const NecCore api{"M88 C++ / PC-8801", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState};
+    static const NecCore api{"M88 C++ / PC-8801", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, nullptr, mouseReads};
     return &api;
 }
