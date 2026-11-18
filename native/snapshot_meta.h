@@ -11,7 +11,7 @@ inline std::string stateHardwareConfig(const std::string& config) {
     std::map<std::string,std::string> hardware;
     while (std::getline(input,line)) {
         std::string key=line.substr(0,line.find('='));
-        if (key.rfind("display_",0)==0 || key.rfind("audio_",0)==0 || key=="host_speed" || key=="host_fullspeed") continue;
+        if (key.rfind("display_",0)==0 || key.rfind("audio_",0)==0 || key.rfind("startup_",0)==0 || key=="host_speed" || key=="host_fullspeed") continue;
         // Mixer gains and the host SoundFont do not change the emulated hardware.
         if (key=="output_volume" || key=="midi_volume" || key=="midi_soundfont" || key=="np2kai_Seek_Vol" ||
             key.compare(0,14,"np2kai_volume_")==0 || key=="m88_fm" || key=="m88_ssg" || key=="m88_adpcm" || key=="m88_rhythm") continue;

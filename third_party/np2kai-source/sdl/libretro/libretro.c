@@ -1954,6 +1954,24 @@ int necmobile_sound_bios_enabled = 1;
 int necmobile_font_kind = 0;
 unsigned int necmobile_mouse_reads = 0;
 RETRO_API unsigned int necmobile_mouse_read_count(void) { return necmobile_mouse_reads; }
+static char necmobile_initial_floppies[2][MAX_PATH];
+static int necmobile_initial_media = 0;
+int necmobile_boot_device = 0;
+RETRO_API void necmobile_configure_media(const char* first, const char* second, bool hard_boot) {
+   snprintf(necmobile_initial_floppies[0], MAX_PATH, "%s", first ? first : "");
+   snprintf(necmobile_initial_floppies[1], MAX_PATH, "%s", second ? second : "");
+   necmobile_boot_device = hard_boot ? 1 : 2;
+   necmobile_initial_media = 1;
+}
+void necmobile_apply_initial_media(void) {
+   unsigned drive;
+   if (!necmobile_initial_media) return;
+   for (drive = 0; drive < 2; drive++) {
+      snprintf(np2cfg.fddfile[drive], MAX_PATH, "%s", necmobile_initial_floppies[drive]);
+      diskdrv_setfdd(drive, necmobile_initial_floppies[drive][0] ? necmobile_initial_floppies[drive] : NULL, 0);
+   }
+   necmobile_complete_media();
+}
 RETRO_API const char* necmobile_font_resource(void) {
    return necmobile_font_kind == 1 ? "FONT.BMP" : necmobile_font_kind == 2 ? "FONT.ROM" : "internal fallback";
 }

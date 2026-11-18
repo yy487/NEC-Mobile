@@ -227,6 +227,8 @@ void run(int platform, std::string directory, std::string disk, std::string seco
     std::string hardDiskPath;
     for (const char* suffix:{".hdi",".nhd",".hdd",".thd"})
         if (disk.size()>=strlen(suffix) && disk.compare(disk.size()-strlen(suffix),strlen(suffix),suffix)==0) hardDiskPath=disk;
+    std::string initialFloppyA = hardDiskPath.empty() ? disk : "";
+    std::string initialFloppyB = secondDisk;
     MachineConfig configuration;
     auto requestEdge = [](std::deque<bool>& edges, bool current, bool requested) {
         if ((edges.empty() ? current : edges.back()) != requested) edges.push_back(requested);
@@ -261,8 +263,8 @@ void run(int platform, std::string directory, std::string disk, std::string seco
             syncFile(folder+"/machine.bin") && syncFile(folder+"/host.bin") && syncFile(folder+"/midi.bin");
     };
     auto installMedia=[&](const SnapshotMeta& target) {
-        for (int i=0;i<2;++i) if (!core->mount(i,"",0)) return false;
-        for (int i=0;i<2;++i) if (!target.media[i].empty() && !core->mount(i,target.media[i].c_str(),target.indices[i])) return false;
+        for (int i=0;i<2;++i) if (!core->mount(i,"",0,false)) return false;
+        for (int i=0;i<2;++i) if (!target.media[i].empty() && !core->mount(i,target.media[i].c_str(),target.indices[i],false)) return false;
         return true;
     };
     auto restoreSession=[&](const std::string& folder) -> std::string {
@@ -286,6 +288,7 @@ void run(int platform, std::string directory, std::string disk, std::string seco
         }
         if (ok) {
             std::lock_guard<std::mutex> lock(statusMutex);
+            current = target;
             driveMedia=target.media;
             for (size_t i=0;i<2;++i) driveIndices[i]=target.indices[i];
         }
@@ -295,6 +298,11 @@ void run(int platform, std::string directory, std::string disk, std::string seco
     };
     try {
         configuration=readMachineConfig(directory.c_str());
+        if (platform == 98) {
+            hardDiskPath = machineText(configuration, "startup_hard_disk", hardDiskPath.c_str());
+            initialFloppyA = machineText(configuration, "startup_floppy_a", initialFloppyA.c_str());
+            initialFloppyB = machineText(configuration, "startup_floppy_b", initialFloppyB.c_str());
+        }
         for (const auto& setting:configuration) current.config+=setting.first+"="+setting.second+"\n";
         if (!hardDiskPath.empty()) current.config+="host_hard_disk="+hardDiskPath+"\n";
         outputVolume = machineInt(configuration,"output_volume",100,0,100);
@@ -328,14 +336,14 @@ void run(int platform, std::string directory, std::string disk, std::string seco
         if (platform == 88) {
             if (firstIndex < 0 || firstIndex >= 64 || secondIndex < 0 || secondIndex >= 64 ||
                     (!secondDisk.empty() && disk == secondDisk && firstIndex == secondIndex) ||
-                    (!disk.empty() && !core->mount(0, disk.c_str(), firstIndex)) ||
-                    (!secondDisk.empty() && !core->mount(1, secondDisk.c_str(), secondIndex)))
+                    (!disk.empty() && !core->mount(0, disk.c_str(), firstIndex, false)) ||
+                    (!secondDisk.empty() && !core->mount(1, secondDisk.c_str(), secondIndex, false)))
                 throw std::runtime_error("Boot disk selection failed");
             core->reset();
         }
         if (!core->enableMouse(mouseEnabled)) throw std::runtime_error("Mouse connection failed");
         if (core->diskPath) {
-            std::array<std::string, 2> expected{hardDiskPath.empty() ? disk : "", secondDisk};
+            std::array<std::string, 2> expected{initialFloppyA, initialFloppyB};
             for (int drive = 0; drive < 2; drive++) {
                 const char* actual = core->diskPath(drive);
                 if (expected[drive] != (actual ? actual : ""))
@@ -345,7 +353,7 @@ void run(int platform, std::string directory, std::string disk, std::string seco
         message(frameReceived.load() ? "Running" : "Core started; waiting for video");
         {
             std::lock_guard<std::mutex> lock(statusMutex);
-            driveMedia = {hardDiskPath.empty() ? disk : "", secondDisk};
+            driveMedia = {initialFloppyA, initialFloppyB};
             driveIndices = {firstIndex, secondIndex};
         }
         startState.store(2);
@@ -373,7 +381,10 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                     }
                     break;
                 case Mount: {
-                    if (command.a < 0 || command.a > 1 || command.b < 0 || command.b >= 64) { message("Disk mount failed"); break; }
+                    if (command.a < 0 || command.a > 1 || command.b < 0 || command.b >= 64) {
+                        if (command.result) command.result->set_value("Disk mount failed");
+                        message("Disk mount failed"); break;
+                    }
                     std::string previous;
                     int previousIndex;
                     bool occupied;
@@ -382,22 +393,27 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                         previous = driveMedia[command.a]; previousIndex = driveIndices[command.a];
                         occupied = !command.path.empty() && driveMedia[1 - command.a] == command.path && driveIndices[1 - command.a] == command.b;
                     }
-                    if (occupied) { message("Disk already in other drive"); break; }
-                    if (core->mount(command.a, command.path.c_str(), command.b)) {
+                    if (occupied) {
+                        if (command.result) command.result->set_value("Disk already in other drive");
+                        message("Disk already in other drive"); break;
+                    }
+                    std::string result;
+                    if (core->mount(command.a, command.path.c_str(), command.b, true)) {
                         {
                             std::lock_guard<std::mutex> lock(statusMutex);
                             driveMedia[command.a] = command.path; driveIndices[command.a] = command.b;
                         }
-                        message(command.path.empty() ? "Disk ejected" : "Disk mounted");
-                    } else if (platform == 88 && !command.path.empty() && !core->mount(command.a, previous.c_str(), previousIndex)) {
+                    } else if (platform == 88 && !command.path.empty() && !core->mount(command.a, previous.c_str(), previousIndex, false)) {
                         { std::lock_guard<std::mutex> lock(statusMutex); driveMedia[command.a].clear(); driveIndices[command.a] = 0; }
-                        message("Disk mount failed; drive empty");
+                        result = "Disk mount failed; drive empty";
                     } else if (core->diskPath) {
                         const char* currentPath = core->diskPath(command.a);
                         std::string actual = currentPath ? currentPath : "";
                         { std::lock_guard<std::mutex> lock(statusMutex); driveMedia[command.a] = actual; driveIndices[command.a] = 0; }
-                        message(actual.empty() && !previous.empty() ? "Disk mount failed; drive empty" : "Disk mount failed");
-                    } else message(command.path.empty() ? "Disk eject failed" : "Disk mount failed");
+                        result = actual.empty() && !previous.empty() ? "Disk mount failed; drive empty" : "Disk mount failed";
+                    } else result = command.path.empty() ? "Disk eject failed" : "Disk mount failed";
+                    if (command.result) command.result->set_value(result);
+                    message(result.empty() ? (command.path.empty() ? "Disk ejected" : "Disk mounted") : result.c_str());
                     break;
                 }
                 case Flush: message(core->flush() ? "Disk changes flushed" : "Disk write failed"); break;
@@ -547,6 +563,18 @@ extern "C" JNIEXPORT jint JNICALL Java_org_necmobile_Native_diskIndex(JNIEnv*, j
     return drive >= 0 && drive < 2 ? driveIndices[drive] : 0;
 }
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_mount(JNIEnv* env, jclass, jint drive, jstring path, jint index) { enqueue({Mount, drive, index, 0, string(env, path)}); }
+extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_mountResult(JNIEnv* env, jclass, jint drive, jstring path, jint index) {
+    auto result = std::make_shared<std::promise<std::string>>();
+    auto future = result->get_future();
+    {
+        std::lock_guard<std::mutex> lock(commandMutex);
+        if (!workerRunning.load() || stopping.load()) return env->NewStringUTF("Game session has stopped");
+        commands.push_back({Mount, drive, index, 0, string(env, path), result});
+    }
+    wake.notify_one();
+    try { return env->NewStringUTF(future.get().c_str()); }
+    catch (const std::exception&) { return env->NewStringUTF("Game session has stopped"); }
+}
 extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_status(JNIEnv* env, jclass) {
     std::lock_guard<std::mutex> lock(statusMutex);
     return env->NewStringUTF(status.c_str());

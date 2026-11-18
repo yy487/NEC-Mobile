@@ -31,12 +31,15 @@ for folder in ('app', 'native', 'scripts', 'tests',
                                   '.bin', '.exe', '.dll', '.pdb', '.obj', '.apk', '.idsig', '.jks', '.keystore', '.zip'):
             continue
         files.append((file, relative))
-for name in ('README.md', 'README.en.md', 'README.ja.md', 'CHANGELOG.md', 'LICENSE.md', '.gitignore', '.gitattributes',
+for name in ('README.md', 'README.en.md', 'README.ja.md', 'CHANGELOG.md', 'COPYING', 'LICENSE.md', '.gitignore', '.gitattributes',
              'settings.gradle.kts', 'build.gradle.kts', 'gradle.properties', 'version.properties', 'gradlew', 'gradlew.bat',
              'third_party/m88/README.md', 'third_party/m88/readme.txt', 'third_party/m88/README.necmobile.md'):
     file = root / name
     if file.exists():
         files.append((file, Path(name)))
+for name in ('README.md', 'fdkernel-source-20220120.zip', 'freecom-source-20220117.zip'):
+    relative = Path('third_party/freedos98') / name
+    files.append((root / relative, relative))
 with zipfile.ZipFile(staging, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as output:
     for file, relative in files:
         output.write(file, 'NEC-Mobile/' + relative.as_posix())

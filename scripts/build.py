@@ -11,7 +11,8 @@ parser.add_argument('--jdk', type=Path)
 parser.add_argument('--cmake', default='cmake')
 parser.add_argument('--sdk', type=Path, default=ROOT / '.cache/android-sdk')
 parser.add_argument('--gradle-arg', action='append', default=[])
-parser.add_argument('--bundle-dos', action='store_true', help='Use the legacy builtin-dos output filename')
+parser.add_argument('--bundle-dos', action='store_true', help='Include optional local DOS assets')
+parser.add_argument('--dos-assets', type=Path, default=ROOT / '.cache/private-dos-0.26.6-assets')
 args = parser.parse_args()
 environment = os.environ.copy()
 if args.jdk:
@@ -23,8 +24,13 @@ key = ROOT / '.cache/signing/development.jks'
 if not key.is_file():
     raise SystemExit('Signing key missing: restore .cache/signing/development.jks before building an update.')
 wrapper = ROOT / ('gradlew.bat' if os.name == 'nt' else 'gradlew')
+dos_arguments = []
+if args.bundle_dos:
+    if not (args.dos_assets / 'dos').is_dir():
+        raise SystemExit('Local DOS asset directory is missing: ' + str(args.dos_assets / 'dos'))
+    dos_arguments = ['-Pnec.dosAssets=' + args.dos_assets.resolve().as_posix()]
 subprocess.run([str(wrapper), 'assembleRelease', '-Pnec.cmake=' + args.cmake,
-                '-Pnec.sdk=' + args.sdk.resolve().as_posix(), '--no-daemon', *args.gradle_arg],
+                '-Pnec.sdk=' + args.sdk.resolve().as_posix(), '--no-daemon', *dos_arguments, *args.gradle_arg],
                cwd=ROOT, env=environment, check=True)
 version = dict(line.split('=', 1) for line in (ROOT / 'version.properties').read_text(encoding='utf-8').splitlines() if '=' in line)['versionName']
 release = ROOT / 'release'

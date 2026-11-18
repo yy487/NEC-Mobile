@@ -17,7 +17,7 @@ struct NecCore {
     void (*frame)();
     void (*key)(int code, bool pressed);
     void (*mouse)(int dx, int dy, unsigned buttons);
-    bool (*mount)(int drive, const char* path, int index);
+    bool (*mount)(int drive, const char* path, int index, bool duringPlay);
     bool (*flush)();
     void (*reset)();
     void (*close)();

@@ -168,6 +168,24 @@ int necmobile_sound_bios_enabled = 1;
 int necmobile_font_kind = 0;
 unsigned int necmobile_mouse_reads = 0;
 RETRO_API unsigned int necmobile_mouse_read_count(void) { return necmobile_mouse_reads; }
+static char necmobile_initial_floppies[2][MAX_PATH];
+static int necmobile_initial_media = 0;
+int necmobile_boot_device = 0;
+RETRO_API void necmobile_configure_media(const char* first, const char* second, bool hard_boot) {
+   snprintf(necmobile_initial_floppies[0], MAX_PATH, "%s", first ? first : "");
+   snprintf(necmobile_initial_floppies[1], MAX_PATH, "%s", second ? second : "");
+   necmobile_boot_device = hard_boot ? 1 : 2;
+   necmobile_initial_media = 1;
+}
+void necmobile_apply_initial_media(void) {
+   unsigned drive;
+   if (!necmobile_initial_media) return;
+   for (drive = 0; drive < 2; drive++) {
+      snprintf(np2cfg.fddfile[drive], MAX_PATH, "%s", necmobile_initial_floppies[drive]);
+      diskdrv_setfdd(drive, necmobile_initial_floppies[drive][0] ? necmobile_initial_floppies[drive] : NULL, 0);
+   }
+   necmobile_complete_media();
+}
 RETRO_API const char* necmobile_font_resource(void) {
    return necmobile_font_kind == 1 ? "FONT.BMP" : necmobile_font_kind == 2 ? "FONT.ROM" : "internal fallback";
 }
@@ -202,6 +220,13 @@ if b'necmobile_*;' not in data:
 
 source = root / 'sdl/np2.c'
 data = source.read_bytes()
+if b'necmobile_apply_initial_media' not in data:
+    needle = b'//printf("bd:%s\\n",base_dir);'
+    if needle not in data: raise ValueError('Expected initial disk mounting entry not found')
+    data = data.replace(needle, b'''#if defined(__LIBRETRO__)
+    { extern void necmobile_apply_initial_media(void); necmobile_apply_initial_media(); }
+#endif
+''' + needle, 1)
 if b'necmobile_midi_enabled' not in data:
     data = data.replace(b'initload();', b'''initload();
 #if defined(__LIBRETRO__)
@@ -213,6 +238,28 @@ if b'necmobile_midi_enabled' not in data:
     }
 #endif''', 1)
     source.write_bytes(data)
+
+if data != source.read_bytes(): source.write_bytes(data)
+
+boot_source = root / 'bios/bios1b.c'
+boot_data = boot_source.read_bytes()
+if b'necmobile_boot_device' not in boot_data:
+    needle = b'bootseg = 0;'
+    if needle not in boot_data: raise ValueError('Expected BIOS bootstrap entry not found')
+    boot_data = boot_data.replace(needle, b'''#if defined(__LIBRETRO__)
+    { extern int necmobile_boot_device;
+      if (necmobile_boot_device == 1) { bootseg = boot_hd(0x80); if (bootseg) return bootseg; }
+      else if (necmobile_boot_device == 2) { bootseg = boot_fd(0, 3); if (bootseg) return bootseg; }
+    }
+#endif
+\t''' + needle, 1)
+    boot_source.write_bytes(boot_data)
+boot_data = boot_source.read_bytes()
+previous_boot = b'if (necmobile_boot_device) { bootseg = boot_hd(0x80); if (bootseg) return bootseg; }'
+if previous_boot in boot_data:
+    boot_data = boot_data.replace(previous_boot, b'''if (necmobile_boot_device == 1) { bootseg = boot_hd(0x80); if (bootseg) return bootseg; }
+      else if (necmobile_boot_device == 2) { bootseg = boot_fd(0, 3); if (bootseg) return bootseg; }''', 1)
+    boot_source.write_bytes(boot_data)
 
 # Disabled or disconnected MIDI must consume output rather than busy-loop forever.
 source = root / 'sdl/cmmidi.c'

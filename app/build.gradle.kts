@@ -61,6 +61,9 @@ android {
         getByName("debug") { signingConfig = signingConfigs.getByName("existing") }
     }
     sourceSets.getByName("main").jniLibs.srcDir(nativeOutput.get().asFile)
+    providers.gradleProperty("nec.dosAssets").orNull?.let {
+        sourceSets.getByName("main").assets.srcDir(rootProject.file(it))
+    }
     packaging { jniLibs.useLegacyPackaging = true }
 }
 

@@ -156,26 +156,63 @@ internal class LibraryUi(private val activity: MainActivity) {
         first != null && second != null && first.file == second.file && first.index == second.index
 
     @Composable private fun LaunchSheet(game: GameLibrary.Game, platform: Int) {
-        var media by remember(game.id, defaultsOnly) { mutableStateOf(LaunchMedia.defaults(game)) }
-        var rememberMedia by remember(game.id) { mutableStateOf(false) }
-        val floppies = remember(game.id) { GameLibrary.media(game).filter { !GameLibrary.hardDisk(it.disk) }.map { LaunchMedia.Ref(it.disk.file.name, it.index) to it.label() } }
-        val disks = remember(game.id) { game.media.filter { GameLibrary.hardDisk(it) }.map { LaunchMedia.Ref(it.file.name, 0) to it.name } }
+        val systems = remember(platform) { BootEnvironment.SYSTEMS.filter { BootEnvironment.hasSystem(activity, it) } }
+        val memoryDrivers = remember(platform) { platform == 98 && BootEnvironment.hasMemoryDrivers(activity) }
+        var media by remember(game.id, defaultsOnly, game.startupInstance, game.startupSystem) { mutableStateOf(LaunchMedia.defaults(game)) }
+        var rememberMedia by remember(game.id) { mutableStateOf(true) }
+        var system by remember(game.id, game.startupInstance, game.startupSystem) { mutableStateOf(BootEnvironment.selected(game)) }
+        var memory by remember(game.id, game.startupMemory) { mutableStateOf(if (memoryDrivers) game.startupMemory else "none") }
+        var source by remember(game.id, game.startupSource) { mutableStateOf(game.startupSource) }
+        var command by remember(game.id, game.startupEntry) { mutableStateOf(game.startupEntry) }
+        val floppies = remember(game.id, game.startupInstance, game.media.size) { GameLibrary.media(game).filter { !GameLibrary.hardDisk(it.disk) }.map { LaunchMedia.Ref(it.disk.file.name, it.index) to it.label() } }
+        val disks = remember(game.id, game.media.size) { game.media.filter { GameLibrary.hardDisk(it) }.map { LaunchMedia.Ref(it.file.name, 0) to it.name } }
         ModalBottomSheet(onDismissRequest = { if (!launching && !activity.isWorking()) launchGame = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(if (defaultsOnly) "默认盘位" else "本次装盘", style = MaterialTheme.typography.headlineSmall)
+                Text(if (defaultsOnly && platform == 98) "启动环境与盘位" else if (defaultsOnly) "默认盘位" else "本次装盘", style = MaterialTheme.typography.headlineSmall)
                 Text(game.name, style = MaterialTheme.typography.titleMedium)
-                MediaPicker("软驱 A", label(game, media.floppyA), floppies, !launching) { selected ->
-                    if (same(selected, media.floppyB)) launchError = "这张盘已经放在软驱 B"
-                    else { media = LaunchMedia(selected, media.floppyB, if (selected == null) media.hardDisk else null); launchError = "" }
+                if (platform == 98) {
+                    SettingChoice("启动环境", BootEnvironment.label(system), systems.map(BootEnvironment::label), !launching && !activity.isWorking()) { index ->
+                        system = systems[index]
+                        if (system != "auto" && system != "dos62") memory = "none"
+                    }
+                    if (system != "existing") {
+                        if (memoryDrivers && (system == "auto" || system == "dos62")) {
+                            SettingChoice("DOS 内存驱动", BootEnvironment.MEMORY_LABELS[BootEnvironment.MEMORIES.indexOf(memory).coerceAtLeast(0)], BootEnvironment.MEMORY_LABELS.toList(), !activity.isWorking()) { memory = BootEnvironment.MEMORIES[it] }
+                            Text("XMS / EMS 使用 DOS 6.2 驱动，扩展内存沿用系统设置。", style = MaterialTheme.typography.bodySmall)
+                        }
+                        val sources = game.media.filter { !game.generatedMedia.containsKey(it.file.name) }
+                        SettingChoice("游戏数据盘", game.disk(source)?.name ?: "自动选择", listOf("自动选择") + sources.map { it.name }, !activity.isWorking()) { index -> source = if (index == 0) "" else sources[index - 1].file.name; command = "" }
+                        if (source.isNotEmpty()) OutlinedTextField(command, onValueChange = { command = it }, label = { Text("启动文件 · 留空自动选择，可填 DRESS/DRESS.BAT") }, enabled = !activity.isWorking(), modifier = Modifier.fillMaxWidth())
+                    }
+                    OutlinedButton(onClick = { activity.prepareStartup(game, system, memory, source, command, defaultsOnly) }, enabled = system in systems && !launching && !activity.isWorking(), modifier = Modifier.fillMaxWidth()) { Text("准备启动环境") }
+                    if (game.startupHint.isNotEmpty()) Text(game.startupHint, style = MaterialTheme.typography.bodySmall)
                 }
-                MediaPicker("软驱 B", label(game, media.floppyB), floppies, !launching) { selected ->
+                MediaPicker("软驱 A", label(game, media.floppyA), floppies, !launching && !activity.isWorking()) { selected ->
+                    if (same(selected, media.floppyB)) launchError = "这张盘已经放在软驱 B"
+                    else {
+                        val bootDevice = if (selected == null && media.hardDisk != null) "hdd" else media.bootDevice
+                        media = LaunchMedia(selected, media.floppyB, media.hardDisk, bootDevice)
+                        launchError = ""
+                    }
+                }
+                MediaPicker("软驱 B", label(game, media.floppyB), floppies, !launching && !activity.isWorking()) { selected ->
                     if (same(selected, media.floppyA)) launchError = "这张盘已经放在软驱 A"
-                    else { media = LaunchMedia(media.floppyA, selected, if (selected == null) media.hardDisk else null); launchError = "" }
+                    else { media = LaunchMedia(media.floppyA, selected, media.hardDisk, media.bootDevice); launchError = "" }
                 }
                 if (platform == 98) {
-                    MediaPicker("硬盘槽", label(game, media.hardDisk), disks, !launching) { selected ->
-                        media = if (selected == null) LaunchMedia(media.floppyA, media.floppyB, null) else LaunchMedia(null, null, selected)
+                    MediaPicker("硬盘槽", label(game, media.hardDisk), disks, !launching && !activity.isWorking()) { selected ->
+                        val bootDevice = when {
+                            selected == null -> "floppy"
+                            media.floppyA == null -> "hdd"
+                            else -> media.bootDevice
+                        }
+                        media = LaunchMedia(media.floppyA, media.floppyB, selected, bootDevice)
                         launchError = ""
+                    }
+                    if (media.hardDisk != null && media.floppyA != null) {
+                        SettingChoice("引导设备", if (media.bootDevice == "hdd") "硬盘" else "软驱 A", listOf("硬盘", "软驱 A"), !launching && !activity.isWorking()) { index ->
+                            media = LaunchMedia(media.floppyA, media.floppyB, media.hardDisk, if (index == 0) "hdd" else "floppy")
+                        }
                     }
                     Text("A、B 为模拟软驱槽，DOS 盘符由游戏系统分配。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -217,7 +254,7 @@ internal class LibraryUi(private val activity: MainActivity) {
         val selected = dosTemplates.firstOrNull { it.file.name == templateId } ?: dosTemplates.firstOrNull()
         var entry by remember(draft.game.id) { mutableStateOf(draft.executables.first()) }
         var directory by remember(draft.game.id) { mutableStateOf(entry.substringBeforeLast('/', "")) }
-        var drive by remember(draft.game.id) { mutableStateOf("A:") }
+        var drive by remember(draft.game.id, selected?.file?.name) { mutableStateOf(selected?.defaultDrive ?: "A:") }
         var initialization by remember(selected?.file?.name) { mutableStateOf(selected?.autoexec ?: "@ECHO OFF\r\n") }
         var advanced by remember(selected?.file?.name) { mutableStateOf(selected?.builtin != true) }
         ModalBottomSheet(onDismissRequest = {
@@ -343,12 +380,12 @@ internal class LibraryUi(private val activity: MainActivity) {
         }
         TextButton(onClick = { draft["m88_dipsw"] = "1829" }) { Text("恢复 0.25 默认 DIP") }
     }
-    @Composable private fun SettingChoice(title: String, selected: String, choices: List<String>, change: (Int) -> Unit) {
+    @Composable private fun SettingChoice(title: String, selected: String, choices: List<String>, enabled: Boolean = true, change: (Int) -> Unit) {
         var expanded by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(title, style = MaterialTheme.typography.labelLarge)
             Box {
-                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) { Text(selected) }
+                OutlinedButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) { Text(selected) }
                 DropdownMenu(expanded, onDismissRequest = { expanded = false }, modifier = Modifier.heightIn(max = 340.dp)) {
                     choices.forEachIndexed { index, value -> DropdownMenuItem(text = { Text(value) }, onClick = { change(index); expanded = false }) }
                 }

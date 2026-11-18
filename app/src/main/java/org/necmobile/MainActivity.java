@@ -94,12 +94,21 @@ public final class MainActivity extends ComponentActivity {
             }
         });
     }
-    void start(GameLibrary.Game game) { if (!busy) ui.openLaunch(game, false); }
-    void launch(GameLibrary.Game displayed, LaunchMedia media, boolean remember) {
-        launch(displayed, media, remember, false);
+    void start(GameLibrary.Game game) {
+        if (busy) return;
+        if (game.startupReady) launch(game, LaunchMedia.defaults(game), false);
+        else ui.openLaunch(game, false);
     }
-    void continueSession(GameLibrary.Game game) { launch(game, null, false, true); }
-    private void launch(GameLibrary.Game displayed, LaunchMedia requestedMedia, boolean remember, boolean resume) {
+    void prepareStartup(GameLibrary.Game game, String system, String memory, String source, String entry, boolean defaults) {
+        GameLibrary selected = games;
+        perform("正在准备启动环境…", () -> selected.prepareStartup(game.id, system, memory, source, entry), prepared -> ui.openLaunch(prepared, defaults));
+    }
+    void launch(GameLibrary.Game displayed, LaunchMedia media, boolean remember) {
+        launch(displayed, media, remember, -1);
+    }
+    void continueSession(GameLibrary.Game game) { launch(game, null, false, StateSlots.AUTO); }
+    private void launch(GameLibrary.Game displayed, LaunchMedia requestedMedia, boolean remember, int restoreSlot) {
+        boolean resume = restoreSlot >= 0;
         if (busy) return;
         GameLibrary selected = games;
         int launchPlatform = platform;
@@ -108,12 +117,13 @@ public final class MainActivity extends ComponentActivity {
             try {
                 GameLibrary.Game game = selected.find(displayed.id);
                 if (game == null) throw new IOException("找不到本游戏记录");
-                LaunchMedia media = resume ? new StateSlots(selected.directory(game)).sessionMedia(game, launchPlatform) : requestedMedia;
+                LaunchMedia media = resume ? new StateSlots(selected.directory(game)).restore(game, launchPlatform, restoreSlot) : requestedMedia;
                 PreparedLaunch prepared = selected.prepare(game, media, resume);
                 runOnUiThread(() -> {
                     busy = false; setProgress("");
                     Intent intent = prepared.intent(this);
                     intent.putExtra("continueSession", resume);
+                    intent.putExtra("restoreSlot", restoreSlot);
                     intent.putExtra("startupReceiver", new ResultReceiver(new Handler(Looper.getMainLooper())) {
                         @Override protected void onReceiveResult(int result, Bundle data) {
                             if (result == RESULT_OK) {
@@ -149,7 +159,13 @@ public final class MainActivity extends ComponentActivity {
                 String value = settings.get(option.key);
                 if (option.accepts(value)) game.machineOptions.put(option.key, value);
             }
-            }); return true;
+            });
+            if (selectedPlatform == 98 && BootEnvironment.hasMemoryDrivers(this)) {
+                GameLibrary.Game saved = selected.find(displayed.id);
+                if (saved != null && saved.startupPolicy.equals("auto") && !saved.startupMemory.equals("none"))
+                    selected.prepareStartup(saved.id, saved.startupSystem);
+            }
+            return true;
         }, ignored -> { ui.closeSettings(); setProgress("系统设置已保存，下次启动生效"); });
     }
     void loadFonts(GameLibrary.Game game) {
@@ -219,7 +235,7 @@ public final class MainActivity extends ComponentActivity {
     }
     void manage(GameLibrary.Game game) {
         if (busy) return;
-        String[] actions = platform == 98 ? new String[]{"系统设置", "字库设置 · FREECG98.BMP", "默认盘位", "修复磁盘名称编码", "重命名", "管理磁盘文件", "移除游戏"} :
+        String[] actions = platform == 98 ? new String[]{"系统设置", "字库设置 · FREECG98.BMP", "启动环境与盘位", "修复磁盘名称编码", "重命名", "管理磁盘文件", "移除游戏"} :
                 new String[]{"系统设置", "默认盘位", "修复磁盘名称编码", "重命名", "管理磁盘文件", "移除游戏"};
         new AlertDialog.Builder(this).setTitle(game.name).setItems(actions, (dialog, choice) -> {
             if (platform == 98 && choice == 1) { fontSettings(game); return; }
@@ -244,7 +260,7 @@ public final class MainActivity extends ComponentActivity {
         String[] labels = game.media.stream().map(disk -> disk.name + (disk.titles.size() > 1 ? "（含 " + disk.titles.size() + " 张盘）" : "") +
                 (disk.file.getName().equals(game.first) ? " · 默认启动盘 " + (game.firstIndex + 1) : "") +
                 (disk.file.getName().equals(game.second) ? " · 默认第二盘 " + (game.secondIndex + 1) : "")).toArray(String[]::new);
-        new AlertDialog.Builder(this).setTitle("游戏磁盘文件").setItems(labels, (dialog, index) -> {
+        AlertDialog.Builder picker = new AlertDialog.Builder(this).setTitle("游戏磁盘文件").setItems(labels, (dialog, index) -> {
             Library.Disk disk = game.media.get(index);
             new AlertDialog.Builder(this).setTitle(disk.name).setItems(new String[]{"导出磁盘副本", "移除这个文件"}, (actions, choice) -> {
                 if (choice == 0) export(disk);
@@ -252,7 +268,21 @@ public final class MainActivity extends ComponentActivity {
                         .setPositiveButton("移除", (confirm, which) -> perform("正在移除文件…", () -> games.removeDisk(game, disk), cleaned -> {}))
                         .setNegativeButton("取消", null).show();
             }).setNegativeButton("返回", null).show();
-        }).setNegativeButton("关闭", null).show();
+        }).setNegativeButton("关闭", null);
+        if (platform == 98) picker.setNeutralButton("添加内置磁盘", (dialog, which) -> new AlertDialog.Builder(this).setTitle("添加内置磁盘")
+                .setItems(new String[]{"新建 1.2 MB 存档盘", "DOS 维护工具盘"}, (choice, kind) -> {
+            GameLibrary selected = games;
+            perform("正在创建 1.2 MB 存档盘…", () -> {
+                GameLibrary.Game current = selected.find(game.id);
+                if (current == null) throw new IOException("找不到本游戏记录");
+                int number = 1;
+                for (GameLibrary.GeneratedMedia item : current.generatedMedia.values()) if (item.role.equals("save")) ++number;
+                if (kind == 0) selected.createSaveDisk(game.id, "存档盘 " + number);
+                else selected.createToolDisk(game.id);
+                return selected.find(game.id);
+            }, this::files);
+        }).setNegativeButton("取消", null).show());
+        picker.show();
     }
     private void remove(GameLibrary.Game game) {
         new AlertDialog.Builder(this).setTitle("移除“" + game.name + "”？").setMessage("将删除这款游戏的应用内磁盘和即时档，需要的游戏内存档可先导出磁盘。")
@@ -310,6 +340,28 @@ public final class MainActivity extends ComponentActivity {
         super.onActivityResult(request, result, data);
         if (request == 30) {
             ui.playerReturned(); refresh();
+            if (data != null && data.hasExtra("restoreSlot")) {
+                String id = data.getStringExtra("gameId"); int slot = data.getIntExtra("restoreSlot", -1);
+                if (slot >= 0 && slot <= StateSlots.COUNT) {
+                    Handler handler = new Handler(Looper.getMainLooper());
+                    long deadline = android.os.SystemClock.uptimeMillis() + 5000;
+                    handler.post(new Runnable() {
+                        @Override public void run() {
+                            android.app.ActivityManager manager = (android.app.ActivityManager)getSystemService(ACTIVITY_SERVICE);
+                            List<android.app.ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
+                            boolean alive = processes != null && processes.stream().anyMatch(process -> process.processName.equals(getPackageName() + ":emulation"));
+                            if (alive && android.os.SystemClock.uptimeMillis() < deadline) { handler.postDelayed(this, 100); return; }
+                            if (alive) { error(new IOException("游玩进程仍在退出，请重新进入游戏读档")); return; }
+                            try {
+                                GameLibrary.Game game = games.find(id);
+                                if (game == null) throw new IOException("找不到本游戏记录");
+                                launch(game, null, false, slot);
+                            } catch (Exception failure) { error(failure); }
+                        }
+                    });
+                }
+                return;
+            }
             if (data != null && data.hasExtra("sessionError")) error(new IOException("退出时会话保存未完成：" + data.getStringExtra("sessionError")));
             return;
         }
@@ -380,7 +432,7 @@ public final class MainActivity extends ComponentActivity {
         if (!isFinishing()) new AlertDialog.Builder(this).setTitle("操作未完成").setMessage(exception.getMessage()).setPositiveButton("知道了", null).show();
     }
     private void help() {
-        new AlertDialog.Builder(this).setTitle("开始游玩").setMessage("选择 PC-88 或 PC-98 后添加游戏文件夹或 ZIP。点启动确认本次软驱或硬盘组合。系统设置按游戏保存，下次启动生效。\n\n游玩时使用菜单换盘、操作键盘或虚拟鼠标，也可保存六个手动即时档。游戏内存档可通过导出磁盘副本保管。")
+        new AlertDialog.Builder(this).setTitle("开始游玩").setMessage("选择 PC-88 或 PC-98 后添加游戏文件夹或 ZIP。点击卡片启动，游戏管理中可调整启动环境与盘位。PC-98 明确缺少 DOS 的游戏会自动补齐系统盘，多个入口可手选后准备。系统设置按游戏保存，下次启动生效。\n\n游玩时使用菜单换盘、操作键盘或虚拟鼠标，也可保存六个手动即时档。换盘面板可新建存档盘，磁盘管理可添加 DOS 维护工具盘。游戏内存档可通过导出磁盘副本保管。")
                 .setPositiveButton("知道了", null).show();
     }
     private void licenses() {

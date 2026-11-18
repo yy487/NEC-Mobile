@@ -855,6 +855,12 @@ REG16 bootstrapload(void) {
 	REG16	bootseg;
 
 //	fdmode = 0;
+	#if defined(__LIBRETRO__)
+    { extern int necmobile_boot_device;
+      if (necmobile_boot_device == 1) { bootseg = boot_hd(0x80); if (bootseg) return bootseg; }
+      else if (necmobile_boot_device == 2) { bootseg = boot_fd(0, 3); if (bootseg) return bootseg; }
+    }
+#endif
 	bootseg = 0;
 	switch(mem[MEMB_MSW5] & 0xf0) {		// うぐぅ…本当はALレジスタの値から
 		case 0x00:					// ノーマル

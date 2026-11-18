@@ -22,6 +22,8 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private FrameLayout screen;
     private ScrollView controls;
     private LinearLayout mouseDock;
+    private FloatingTools floatingTools;
+    private final Map<Button, Integer> toolKeys = new HashMap<>();
     private MousePad mousePad;
     private SwipeKeys swipeKeys;
     private final List<Button> mouseKeys = new ArrayList<>();
@@ -73,7 +75,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                     resumeLoading = stateBusy = true; applyPause();
                     stateIo.execute(() -> {
                         String error = null;
-                        try { stateSlots().load(StateSlots.AUTO); } catch (Exception exception) { error = exception.getMessage(); }
+                        try { stateSlots().load(getIntent().getIntExtra("restoreSlot", StateSlots.AUTO)); } catch (Exception exception) { error = exception.getMessage(); }
                         String result = error;
                         handler.post(() -> { stateBusy = false; if (!closing) completeStartup(result); });
                     });
@@ -92,12 +94,8 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             switch (text) {
                 case "Paused": text = userPaused ? "已暂停" : null; break;
                 case "Disk changes flushed": text = "磁盘写入已提交"; break;
-                case "Disk mounted": text = "磁盘已装入"; break;
-                case "Disk ejected": text = "磁盘已取出"; break;
-                case "Disk eject failed": text = "退盘失败，磁盘仍保留在驱动器中"; break;
-                case "Disk mount failed": text = "装盘失败，请检查格式与驱动器"; break;
-                case "Disk already in other drive": text = "这张盘已在另一驱动器中，请先取出"; break;
-                case "Disk mount failed; drive empty": text = "装盘失败，磁盘槽现为空，请重新装入"; break;
+                case "Disk mounted": case "Disk ejected": case "Disk eject failed": case "Disk mount failed":
+                case "Disk already in other drive": case "Disk mount failed; drive empty": text = null; break;
                 case "Disk write failed": text = "磁盘写入失败"; break;
                 case "Reset": text = "已复位"; break;
                 case "Audio unavailable; emulation continues muted": text = "音频暂不可用，正在尝试恢复"; break;
@@ -204,17 +202,17 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         keyboard = Ui.column(this); controls.addView(keyboard);
         controls.setBackground(Ui.background(0xe010151f, Ui.dp(this, 12)));
         controls.setVisibility(View.GONE); root.addView(controls);
-        LinearLayout toolbar = Ui.row(this); toolbar.setAlpha(0.86f);
-        toolbar.addView(key("Enter", 13, false), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
-        if (platform == 88) toolbar.addView(key("空格", 32, false), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
-        toolbar.addView(Ui.button(this, "键盘", this::toggleKeyboard), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
+        List<View> shortcuts = new ArrayList<>();
+        Button enter = key("Enter", 13, false); toolKeys.put(enter, 13); shortcuts.add(enter);
+        if (platform == 88) {
+            Button space = key("空格", 32, false); toolKeys.put(space, 32); shortcuts.add(space);
+        }
+        shortcuts.add(Ui.button(this, "键盘", () -> { floatingTools.collapse(); toggleKeyboard(); }));
         inputSwitch = Ui.button(this, "按键", () -> requestInputMode(mouseEnabled ? INPUT_KEYS : INPUT_MOUSE));
         inputSwitch.setTextSize(12);
         inputSwitch.setOnLongClickListener(view -> { inputSettings(); return true; });
-        toolbar.addView(inputSwitch, new LinearLayout.LayoutParams(Ui.dp(this, 80), Ui.dp(this, 38)));
-        toolbar.addView(Ui.button(this, "菜单", this::menu), new LinearLayout.LayoutParams(Ui.dp(this, 64), Ui.dp(this, 38)));
-        FrameLayout.LayoutParams bar = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
-        bar.setMargins(Ui.dp(this, 6), Ui.dp(this, 6), Ui.dp(this, 6), Ui.dp(this, 6)); root.addView(toolbar, bar);
+        shortcuts.add(inputSwitch);
+        shortcuts.add(Ui.button(this, "菜单", () -> { floatingTools.collapse(); menu(); }));
         mouseDock = Ui.row(this);
         for (int mask : new int[]{1, 2}) {
             boolean[] touchClick = {false};
@@ -235,10 +233,16 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             mouseKeys.add(button); mouseDock.addView(button, new LinearLayout.LayoutParams(Ui.dp(this, 56), Ui.dp(this, 38)));
         }
         mouseDock.setAlpha(0.86f); mouseDock.setVisibility(mouseEnabled ? View.VISIBLE : View.GONE); root.addView(mouseDock);
+        floatingTools = new FloatingTools(this, shortcuts, this::releaseToolKeys);
+        root.addView(floatingTools, new FrameLayout.LayoutParams(-1, -1));
         layoutPlayer();
         buildKeyboard();
         refreshInputButton();
         setContentView(root); immersive();
+        if (Build.VERSION.SDK_INT >= 33) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::onBackPressed);
+        }
         try {
             nativeStarted = Native.start(platform, getIntent().getStringExtra("directory"), getIntent().getStringExtra("disk"), getIntent().getStringExtra("secondDisk"),
                     getIntent().getIntExtra("mode", 0), getIntent().getIntExtra("firstIndex", 0), getIntent().getIntExtra("secondIndex", 0), true);
@@ -263,6 +267,13 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private boolean mouseAllowed() { return mouseEnabled && nativeStarted && resumed && !closing && !appliedPause && !stateBusy; }
     private boolean touchKeysAllowed() { return !mouseEnabled && nativeStarted && resumed && !closing && !appliedPause && !stateBusy; }
+    private void releaseToolKeys() {
+        for (Map.Entry<Button, Integer> entry : toolKeys.entrySet()) {
+            if (touchedKeys.remove(entry.getKey()) && nativeStarted) Native.key(entry.getValue(), false);
+            entry.getKey().setPressed(false);
+        }
+        applyPendingInput(); refreshInputButton();
+    }
     private void updateInputMode() {
         if (!nativeStarted || closing) return;
         mouseSuggested = inputMode == INPUT_AUTO && inputPreset == null && suggestedPreset == null && !mouseEnabled && Native.mouseActivity();
@@ -444,6 +455,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void applyPause() {
         cancelMouse();
+        if (floatingTools != null) floatingTools.cancelInteraction();
         if (!nativeStarted || closing) return;
         boolean shouldPause = userPaused || !resumed || !focusGranted || openDialogs > 0 || stateBusy || autoSaving || !startupReported || startupFailed;
         if (shouldPause != appliedPause) { Native.pause(shouldPause); appliedPause = shouldPause; }
@@ -525,7 +537,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             }
             grid.addView(line);
         }
-        picker[0]=dialog().setTitle("即时存档 / 读档").setView(grid).setNeutralButton("说明",(a,b)->dialog().setTitle("手动即时存档").setMessage("每款游戏有 6 个手动槽，另有一个独立的自动会话槽。可在系统设置中启用自动保存，从卡片继续会话。\n\n即时档恢复机器状态及装盘组合，磁盘里的写入不会回退。覆盖时旧槽保留到保存成功，读档失败时尝试恢复读档前的进度。\n\n读取时需使用同一游戏副本与保存时的机器 / 音源硬件设置。卸载或移除游戏会删除这些槽。")
+        picker[0]=dialog().setTitle("即时存档 / 读档").setView(grid).setNeutralButton("说明",(a,b)->dialog().setTitle("手动即时存档").setMessage("每款游戏有 6 个手动槽，另有一个独立的自动会话槽。可在系统设置中启用自动保存，从卡片继续会话。\n\n即时档恢复机器状态及装盘组合，磁盘里的写入不会回退。覆盖时旧槽保留到保存成功，读档失败时尝试恢复读档前的进度。\n\n机器或硬盘环境不同时，会按存档配置重新启动游玩进程。卸载或移除游戏会删除这些槽。")
                 .setPositiveButton("知道了",null).show()).setNegativeButton("返回游戏",null).show();
     }
     private void stateTask(int slot,boolean load) {
@@ -534,17 +546,34 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         AlertDialog progress=dialog().setTitle(load ? "正在读档…" : "正在保存…").setMessage("槽 "+slot).setCancelable(false).show();
         stateIo.execute(()-> {
             String error=null;
+            boolean restart = false;
             try { if (load) stateSlots().load(slot); else stateSlots().save(slot); }
+            catch (StateSlots.RestartRequired required) { restart = true; }
             catch (Exception exception) { error=exception.getMessage(); }
             String result=error;
+            boolean restartRequired = restart;
             handler.post(()-> {
                 stateBusy=false;
                 if (isFinishing() || closing) { progress.dismiss(); return; }
+                if (restartRequired) {
+                    progress.dismiss(); restartForState(slot); return;
+                }
                 if (result!=null) dialog().setTitle(load ? "读档未完成" : "保存未完成").setMessage(result).setPositiveButton("知道了",null).show();
                 else Toast.makeText(this,load ? "已读取槽 "+slot : "已保存到槽 "+slot,Toast.LENGTH_SHORT).show();
                 progress.dismiss();
                 if (autoPending) { autoPending = false; saveAutomatic(); }
                 applyPause();
+            });
+        });
+    }
+    private void restartForState(int slot) {
+        cancelMouse(); closing = true; handler.removeCallbacks(statusUpdate); Native.pause(true);
+        stateIo.execute(() -> {
+            Native.stop();
+            handler.post(() -> {
+                Intent result = new Intent(); result.putExtra("restoreSlot", slot);
+                result.putExtra("gameId", getIntent().getStringExtra("gameId"));
+                setResult(RESULT_OK, result); finish();
             });
         });
     }
@@ -663,6 +692,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         super.onConfigurationChanged(configuration);
         cancelMouse();
         layoutPlayer(); immersive();
+        floatingTools.cancelInteraction();
     }
     private void disks() {
         String[] labels = new String[2];
@@ -671,28 +701,95 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             String name = mediaNames.getOrDefault(path, new java.io.File(path).getName());
             int index = Native.diskIndex(drive);
             for (Library.Disk disk : gameDisks) if (disk.file.getAbsolutePath().equals(path)) name = disk.label(index);
-            labels[drive] = "磁盘槽 " + (drive + 1) + "：" + (path.isEmpty() ? "空" : name);
+            labels[drive] = (drive == 0 ? "软驱 A：" : "软驱 B：") + (path.isEmpty() ? "空" : name);
         }
-        dialog().setTitle("更换 / 取出磁盘").setItems(labels, (choose, drive) -> {
+        AlertDialog.Builder picker = dialog().setTitle("更换 / 取出磁盘").setItems(labels, (choose, drive) -> {
             boolean empty = Native.disk(drive).isEmpty();
             String[] operations = empty ? new String[]{"装入磁盘"} : new String[]{"换入其他盘", "取出当前盘"};
             dialog().setTitle(labels[drive]).setItems(operations, (operation, action) -> {
-                if (!empty && action == 1) Native.mount(drive, "", 0);
+                if (!empty && action == 1) mountDisk(drive, "", 0);
                 else chooseDisk(drive);
             }).setNegativeButton("取消", null).show();
-        }).setNegativeButton("返回游戏", null).show();
+        }).setNegativeButton("返回游戏", null);
+        if (platform == 98) picker.setNeutralButton("新建存档盘", (dialog, which) -> createSaveDisk());
+        picker.show();
+    }
+    private void mountDisk(int drive, String path, int index) {
+        if (stateBusy || closing) return;
+        stateBusy = true; applyPause();
+        stateIo.execute(() -> {
+            String result = Native.mountResult(drive, path, index);
+            handler.post(() -> {
+                stateBusy = false;
+                if (closing) return;
+                if (result.isEmpty()) Toast.makeText(this, path.isEmpty() ? "磁盘已取出" : "磁盘已装入", Toast.LENGTH_SHORT).show();
+                else {
+                    String detail;
+                    switch (result) {
+                        case "Disk eject failed": detail = "退盘失败，磁盘仍在驱动器中"; break;
+                        case "Disk already in other drive": detail = "这张盘已在另一软驱中，请先取出"; break;
+                        case "Disk mount failed; drive empty": detail = "装盘失败，当前软驱为空，请重新装入"; break;
+                        case "Game session has stopped": detail = "游玩会话已结束，请重新启动游戏"; break;
+                        default: detail = "装盘失败，请检查磁盘格式与目标软驱";
+                    }
+                    dialog().setTitle("换盘未完成").setMessage(detail).setPositiveButton("知道了", null).show();
+                }
+                if (autoPending) { autoPending = false; saveAutomatic(); }
+                applyPause();
+            });
+        });
+    }
+    private void createSaveDisk() {
+        if (stateBusy || closing) return;
+        stateBusy = true; applyPause();
+        AlertDialog progress = dialog().setTitle("正在创建 1.2 MB 存档盘…").setCancelable(false).show();
+        stateIo.execute(() -> {
+            Library.Disk disk = null;
+            GameLibrary.Game updated = null;
+            String error = null;
+            try {
+                GameLibrary library = new GameLibrary(this, platform);
+                String id = getIntent().getStringExtra("gameId");
+                GameLibrary.Game game = library.find(id);
+                if (game == null) throw new java.io.IOException("找不到本游戏记录");
+                int number = 1;
+                for (GameLibrary.GeneratedMedia item : game.generatedMedia.values()) if (item.role.equals("save")) ++number;
+                disk = library.createSaveDisk(id, "存档盘 " + number);
+                updated = library.find(id);
+                if (updated == null) throw new java.io.IOException("存档盘已创建，游戏记录暂时无法读取");
+            } catch (Exception exception) { error = exception.getMessage(); }
+            Library.Disk created = disk;
+            GameLibrary.Game current = updated;
+            String failure = error;
+            handler.post(() -> {
+                stateBusy = false;
+                if (closing) { progress.dismiss(); return; }
+                if (failure != null) dialog().setTitle("创建未完成").setMessage(failure).setPositiveButton("知道了", null).show();
+                else {
+                    gameDisks = current.media;
+                    for (Library.Disk item : gameDisks) mediaNames.put(item.file.getAbsolutePath(), item.name);
+                    dialog().setTitle(created.name + " · 装入位置").setItems(new String[]{"软驱 A", "软驱 B"},
+                            (choose, drive) -> mountDisk(drive, created.file.getAbsolutePath(), 0)).setNegativeButton("保存到游戏库", null).show();
+                }
+                progress.dismiss();
+                if (autoPending) { autoPending = false; saveAutomatic(); }
+                applyPause();
+            });
+        });
     }
     private void chooseDisk(int drive) {
         List<GameLibrary.Media> available = new ArrayList<>();
         String otherPath = Native.disk(1 - drive); int otherIndex = Native.diskIndex(1 - drive);
+        String currentPath = Native.disk(drive); int currentIndex = Native.diskIndex(drive);
         for (Library.Disk disk : gameDisks) if (!GameLibrary.hardDisk(disk))
             for (int index = 0; index < disk.titles.size(); index++)
-                if (!disk.file.getAbsolutePath().equals(otherPath) || index != otherIndex) available.add(new GameLibrary.Media(disk, index));
-        if (available.isEmpty()) { Toast.makeText(this, "没有可换入的软盘，请先取出另一槽中的盘", Toast.LENGTH_LONG).show(); return; }
+                if ((!disk.file.getAbsolutePath().equals(otherPath) || index != otherIndex)
+                        && (!disk.file.getAbsolutePath().equals(currentPath) || index != currentIndex)) available.add(new GameLibrary.Media(disk, index));
+        if (available.isEmpty()) { Toast.makeText(this, "没有可换入的其他软盘", Toast.LENGTH_LONG).show(); return; }
         String[] names = available.stream().map(GameLibrary.Media::label).toArray(String[]::new);
         dialog().setTitle("选择换入的磁盘").setItems(names, (dialog, item) -> {
             GameLibrary.Media selected = available.get(item);
-            Native.mount(drive, selected.disk.file.getAbsolutePath(), selected.index);
+            mountDisk(drive, selected.disk.file.getAbsolutePath(), selected.index);
         }).setNegativeButton("取消", null).show();
     }
     private void confirmExit() {
@@ -716,7 +813,10 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             runOnUiThread(() -> { Intent data = new Intent(); if (result != null) data.putExtra("sessionError", result); setResult(RESULT_OK, data); finish(); });
         });
     }
-    @Override public void onBackPressed() { confirmExit(); }
+    @Override public void onBackPressed() {
+        if (floatingTools.isExpanded()) floatingTools.collapse();
+        else confirmExit();
+    }
     @Override protected void onResume() {
         super.onResume(); resumed = true;
         requestFocus();

@@ -42,6 +42,9 @@ __pycache__/
 !/third_party/np2kai-source/
 !/third_party/tinysoundfont/
 !/third_party/fatfs/
+!/third_party/freedos98/
+!/third_party/freedos98/fdkernel-source-20220120.zip
+!/third_party/freedos98/freecom-source-20220117.zip
 /third_party/m88/*
 !/third_party/m88/README.md
 !/third_party/m88/readme.txt

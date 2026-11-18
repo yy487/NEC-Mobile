@@ -702,6 +702,9 @@ int np2_main(int argc, char *argv[]) {
 		}
 	}
 
+#if defined(__LIBRETRO__)
+    { extern void necmobile_apply_initial_media(void); necmobile_apply_initial_media(); }
+#endif
 //printf("bd:%s\n",base_dir);
 //printf("fdin:%d\n",drvfdd);
 //printf("hdin:%d\n",HDCount);

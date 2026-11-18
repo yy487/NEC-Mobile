@@ -15,9 +15,10 @@ import java.util.zip.ZipFile;
 
 final class DosLibrary {
     static final Charset OEM = Charset.forName("windows-31j");
+    private static final String FREEDOS_TEMPLATE = "builtin-freedos-v2.hdi";
     static final class Template {
         final File file;
-        final String name, info, autoexec;
+        final String name, info, autoexec, defaultDrive;
         final boolean builtin;
         Template(File file, String name, String info, String autoexec) {
             this(file, name, info, autoexec, false);
@@ -25,6 +26,7 @@ final class DosLibrary {
         Template(File file, String name, String info, String autoexec, boolean builtin) {
             this.file = file; this.name = name; this.info = info; this.autoexec = autoexec;
             this.builtin = builtin;
+            this.defaultDrive = "A:";
         }
     }
     static final class Draft {
@@ -46,12 +48,23 @@ final class DosLibrary {
     }
     List<Template> templates() throws IOException {
         installBuiltin();
+        File freedos = new File(templates, FREEDOS_TEMPLATE);
+        if (!freedos.isFile()) {
+            File source = new BootEnvironment(context, games).asset("boot/freedos-v2.hdi", "freedos-v2.hdi");
+            Native.hdiInfo(source.getAbsolutePath());
+            AtomicFile storage = new AtomicFile(freedos); FileOutputStream output = storage.startWrite();
+            try (InputStream input = new FileInputStream(source)) {
+                Library.copy(input, output, 256L * 1024 * 1024); storage.finishWrite(output);
+            } catch (IOException error) { storage.failWrite(output); throw error; }
+        }
         List<Template> result = new ArrayList<>();
         File[] files = templates.listFiles(file -> file.isFile() && file.getName().endsWith(".hdi"));
         if (files == null) return result;
         for (File file : files) {
-            boolean builtin = file.getName().equals("builtin-dos-v1.hdi");
-            String name = builtin ? "内置 DOS 系统" : file.getName();
+            if (file.getName().equals("builtin-freedos-v1.hdi")) continue;
+            boolean isFreeDos = file.getName().equals(FREEDOS_TEMPLATE);
+            boolean builtin = isFreeDos || file.getName().equals("builtin-dos-v1.hdi");
+            String name = isFreeDos ? "FreeDOS(98)" : builtin ? "内置 DOS 系统" : file.getName();
             File label = new File(file + ".label");
             if (label.isFile() && label.length() < 1024) try (InputStream in = new FileInputStream(label); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 Library.copy(in, out, 1024); name = new String(out.toByteArray(), StandardCharsets.UTF_8);
@@ -59,7 +72,9 @@ final class DosLibrary {
             try { result.add(new Template(file, name, Native.hdiInfo(file.getAbsolutePath()), new String(Native.dosAutoexec(file.getAbsolutePath()), OEM).replace("\u001a", ""), builtin)); }
             catch (IOException failure) { result.add(new Template(file, name, "不可用 · " + failure.getMessage(), "")); }
         }
-        result.sort(Comparator.comparing((Template template) -> !template.builtin).thenComparing(template -> template.name)); return result;
+        result.sort(Comparator.comparing((Template template) -> !template.file.getName().equals("builtin-dos-v1.hdi"))
+                .thenComparing(template -> !template.builtin).thenComparing(template -> template.name));
+        return result;
     }
     private void installBuiltin() throws IOException {
         String[] bundled = context.getAssets().list("dos");
@@ -95,7 +110,7 @@ final class DosLibrary {
             return new Template(output, name, info, startup);
         } catch (Exception error) { temporary.delete(); output.delete(); throw error; }
     }
-    private static void component(String name) throws IOException {
+    static void component(String name) throws IOException {
         if (name.isEmpty() || name.equals(".") || name.equals("..") || name.indexOf('/') >= 0 || name.indexOf('\\') >= 0 ||
                 name.chars().anyMatch(value -> value <= 32 || "\"*+,/:;<=>?[\\]|&%()!^".indexOf(value) >= 0))
             throw new IOException("DOS 文件名不兼容：" + name);
@@ -158,7 +173,14 @@ final class DosLibrary {
             }
             collect(draft, draft.source);
             if (draft.executables.isEmpty()) throw new IOException("没有找到 BAT、EXE 或 COM 启动文件");
-            draft.executables.sort(Comparator.comparingInt((String path) -> path.equalsIgnoreCase("LIENA.BAT") ? 0 : path.toUpperCase(Locale.ROOT).endsWith(".BAT") ? 1 : 2).thenComparing(String::compareToIgnoreCase));
+            Map<String, Integer> ranks = new HashMap<>();
+            for (String path : draft.executables) ranks.put(path, (path.contains("/") ? 10 : 0) + (path.toUpperCase(Locale.ROOT).endsWith(".BAT") ? 0 : 2));
+            for (String path : draft.executables) {
+                if (!path.toUpperCase(Locale.ROOT).endsWith(".BAT")) continue;
+                String program = simpleWrapper(draft, path);
+                if (!program.isEmpty()) { ranks.put(program, ranks.get(path)); ranks.put(path, ranks.get(path) + 3); }
+            }
+            draft.executables.sort(Comparator.comparingInt((String path) -> ranks.get(path)).thenComparing(String::compareToIgnoreCase));
             return draft;
         } catch (Exception error) { discard(draft); throw error; }
     }
@@ -193,11 +215,34 @@ final class DosLibrary {
             else if (file.getName().matches("(?i).+\\.(bat|exe|com)$")) draft.executables.add(draft.source.toURI().relativize(file.toURI()).getPath());
         }
     }
+    private String simpleWrapper(Draft draft, String path) throws IOException {
+        File script = new File(draft.source, path);
+        if (script.length() > 4096) return "";
+        String stem = script.getName().substring(0, script.getName().length() - 4);
+        String program = "";
+        for (String candidate : draft.executables)
+            if (candidate.equalsIgnoreCase(path.substring(0, path.length() - 4) + ".COM") || candidate.equalsIgnoreCase(path.substring(0, path.length() - 4) + ".EXE")) {
+                if (!program.isEmpty()) return "";
+                program = candidate;
+            }
+        if (program.isEmpty()) return "";
+        boolean invoked = false;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(script), OEM))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.replace("\u001a", "").trim().replaceFirst("^@", "");
+                if (line.isEmpty() || line.matches("(?i)(ECHO +OFF|[A-Z]:|CD +[^&|<>]+|REM(?: .*|))")) continue;
+                if (invoked || !(line.equalsIgnoreCase(stem) || line.equalsIgnoreCase(new File(program).getName()))) return "";
+                invoked = true;
+            }
+        }
+        return invoked ? program : "";
+    }
     GameLibrary.Game commit(Draft draft, Template template, String entry, String workingDirectory, String drive, String initialization) throws Exception {
         if (games.find(draft.game.id) != null) throw new IOException("游戏已建立，请从已有卡片启动");
         if (!draft.executables.contains(entry)) throw new IOException("启动文件不在本次游戏目录内");
         if (!drive.matches("[A-F]:")) throw new IOException("DOS 启动盘符无效");
-        String directory = workingDirectory.replace('\\', '/');
+        String directory = workingDirectory.replace('\\', '/').replaceAll("/+$", "");
         if (!directory.isEmpty()) {
             for (String part : directory.split("/")) component(part);
             File selected = new File(draft.source, directory);
@@ -205,12 +250,12 @@ final class DosLibrary {
         }
         String guestEntry = "\\NECGAME\\" + entry.replace('/', '\\');
         String startup = "@ECHO OFF\r\n" + drive + "\r\nCD \\NECGAME" + (directory.isEmpty() ? "" : "\\" + directory.replace('/', '\\')) + "\r\n" +
-                (entry.toUpperCase(Locale.ROOT).endsWith(".BAT") ? "CALL " : "") + guestEntry + "\r\n";
+                guestEntry + "\r\n";
         int end = initialization.indexOf(26);
         String original = end < 0 ? initialization : initialization.substring(0, end);
         original = original.replace("\r\n", "\n").replace('\r', '\n').replace("\n", "\r\n");
         if (!new String(original.getBytes(OEM), OEM).equals(original)) throw new IOException("初始化命令包含代码页 932 无法保存的字符");
-        String autoexec = original + "\r\nCALL " + drive + "\\NECMOB\\START.BAT\r\n";
+        String autoexec = original + "\r\n" + drive + "\\NECMOB\\START.BAT\r\n";
         File media = new File(draft.directory, "media"); media.mkdirs();
         File temporary = new File(media, "dos-import.pending.hdi"), target = new File(media, "dos-game.hdi");
         List<String> hosts = new ArrayList<>(); List<byte[]> names = new ArrayList<>();
@@ -229,6 +274,8 @@ final class DosLibrary {
             draft.game.media.clear();
             draft.game.media.add(new Library.Disk("DOS 游戏硬盘", target));
             draft.game.first = target.getName(); draft.game.second = "";
+            draft.game.startupReady = true;
+            draft.game.startupHint = template.name + " · " + entry;
             JSONObject launch = new JSONObject(); launch.put("template", template.name); launch.put("entry", entry); launch.put("workingDirectory", directory); launch.put("drive", drive);
             AtomicFile config = new AtomicFile(new File(draft.directory, "dos-launch.json")); FileOutputStream out = config.startWrite();
             try { out.write(launch.toString(2).getBytes(StandardCharsets.UTF_8)); config.finishWrite(out); }

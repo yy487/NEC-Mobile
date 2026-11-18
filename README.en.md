@@ -4,10 +4,10 @@
 
 Play PC-88 and PC-98 games on Android. NEC Mobile brings the M88 PC-88 core and the NP2kai PC-98 core into one app, with separate game libraries, resources, and machine settings for each platform.
 
-Latest public version **0.26.3**, for **ARM64 devices running Android 8.0 or later**.
+Version **0.26.6**, for **ARM64 devices running Android 8.0 or later**.
 
-- Android APK `NEC-Mobile-0.26.3-arm64.apk`
-- Source archive `NEC-Mobile-0.26.3-sources.zip`
+- Android APK `NEC-Mobile-0.26.6-arm64.apk`
+- Source archive `NEC-Mobile-0.26.6-sources.zip`
 
 ## Features
 
@@ -28,7 +28,7 @@ Menu labels below match the app's Chinese interface.
 1. Install the APK, open the app, and select **PC-88** or **PC-98**.
 2. The app supplies default boot firmware and fonts. Import game-specific firmware through **设置 → 导入系统 ROM / 字库**, or include it in the game's folder or ZIP.
 3. Select **添加游戏** and choose a folder or ZIP containing one game and its complete disk set.
-4. Tap a game card and confirm floppy A/B or a standalone hard disk in the launch sheet. Select **记住这次装盘** to save the selection, or edit **游戏管理 → 默认盘位**.
+4. Tap a game card to start. Edit **游戏管理 → 启动环境与盘位** for PC-98, or **默认盘位** for PC-88. Floppy A, floppy B and the hard disk have independent slots, with a selectable boot device.
 
 The app stores game progress in imported disk copies. Tapping the card again boots the machine with the saved disk selection.
 
@@ -41,6 +41,8 @@ The app stores game progress in imported disk copies. Tapping the card again boo
 The game card's **管理** menu provides renaming, machine and sound settings, disk export, and removal. For a cover, use a PNG, JPEG, or WebP image named `cover`, `folder`, `front`, or `title`. You can also capture the current game screen through **菜单 → 更多设置 → 将当前画面设为封面**.
 
 ## Controls
+
+Tap the translucent floating button to expand or collapse the shortcuts. Drag it to either edge. Portrait and landscape positions are saved separately. The panel provides Enter, keyboard, input mode, and menu, plus Space on PC-88. Back closes the expanded panel.
 
 Choose automatic configuration, virtual mouse, or swipe keys through **菜单 → 操作方式 / 鼠标**. Automatic configuration uses an applied preset, then the previous control mode, with swipe keys as the initial default. Complete guest mouse transactions offer a **试用鼠标** suggestion. Tap it to select and remember mouse mode for this game. Tap the in-game control-mode button to switch, or hold it to open settings. A pending switch takes effect when the current touch ends.
 
@@ -62,7 +64,7 @@ The game pauses when the app moves to the background or loses audio focus. It re
 ## Changing disks during play
 
 1. When the game requests another disk, open **菜单 → 更换 / 取出磁盘**.
-2. Select the drive to change, then choose **换入其他盘**.
+2. Select floppy drive A or B as requested by the game, then choose **换入其他盘**.
 3. Select the requested disk, return to the game, and follow its prompt.
 
 The list contains floppy disks imported for that game. For a D88 file containing several disks, choose by internal disk title or number. Use **装入磁盘** for an empty drive and **取出当前盘** to eject a disk. Disk changes take effect in the current session. Hard-disk images are selected through the boot configuration.
@@ -73,7 +75,7 @@ Open **菜单 → 即时存档 / 读档** to access six slots. Select a slot to 
 
 A save state contains the CPU, memory, device state, mounted disk selection, and MIDI channels. Loading a state combines the restored machine state with the disks' current contents. The game's own save function writes progress to the disk copies.
 
-Load states using the same game copy, machine configuration, and sound hardware settings used when saving, including the MIDI enable setting. Mixer levels and the SF2 soundfont can be changed independently.
+Loading a state restores its disk selection. A different machine or hard-disk environment triggers a player-process restart with the saved configuration. Earlier managed system-disk instances remain available, and disk removal checks save-state references.
 
 To keep in-game saves, export the relevant disk through **管理 → 管理磁盘文件 → 导出磁盘副本**. Removing a game or uninstalling the app deletes its app-managed disks and save states.
 
@@ -106,11 +108,19 @@ TinySoundFont synthesizes General MIDI music using the selected SF2. PC-98 uses 
 
 ## PC-98 DOS folders
 
-Select **添加游戏 → DOS 游戏目录 / DOS 游戏 ZIP** in the PC-98 library. From 0.26.4, the app provides a default DOS template. Confirm the BAT/EXE/COM entry and create the disk. The working directory, drive letter, initialization commands, and alternative templates are available in advanced startup settings.
+Select **添加游戏 → DOS 游戏目录 / DOS 游戏 ZIP** in the PC-98 library. The default template uses FreeDOS(98). Confirm the BAT/EXE/COM entry and create the disk. The working directory, drive letter, initialization commands, and alternative templates are available in advanced startup settings.
 
-Each game gets a private writable HDI. Names must follow DOS 8.3 rules in code page 932. Incompatible names, collisions, or insufficient space stop the import. Custom templates can contain PC-98 FAT12/FAT16 partitions and require IO.SYS, MSDOS.SYS, and COMMAND.COM. Export the game HDI through disk management to back up its in-game saves.
+Each game gets a private writable HDI. Names must follow DOS 8.3 rules in code page 932. Incompatible names, collisions, or insufficient space stop the import. PC-98 FAT12/FAT16 templates support IO.SYS, MSDOS.SYS and COMMAND.COM, or the FreeDOS KERNEL.SYS and COMMAND.COM pair. Export the game HDI through disk management to back up its in-game saves.
 
-The bundled environment uses the MS-DOS 5.00 system template supplied for this project. The app creates a system copy for each game.
+The app creates a writable system copy for each game. Import your own PC-98 HDI template for games that require a particular commercial DOS version.
+
+### Startup environments and save disks
+
+PC-98 imports inspect boot records and DOS files. A clear missing-DOS layout with an identifiable entry gets a generated system disk. Games with their own boot environment use their supplied disks.
+
+Open **游戏管理 → 启动环境与盘位** for automatic preparation or FreeDOS(98). For multiple entries, choose the data disk, enter the program path inside it and tap **准备启动环境**. Local builds can include supplied MS-DOS 2.1, 3.3D, 5.0A and 6.2 disks and the DOS 6.2 HIMEM / EMM386 drivers.
+
+Use **管理磁盘文件 → 添加内置磁盘** to create a writable 1.2 MB FAT12 save disk or a DOS maintenance disk. The in-game disk picker can also create save disks and mount them in either floppy drive. Created disks stay in the game's disk list for reuse and export. Boot the FreeDOS maintenance disk in floppy A to use commands such as DIR, COPY, TYPE and SYS.
 
 ## Runtime resources
 
@@ -121,7 +131,7 @@ The APK includes the emulator cores and runtime libraries. Phones require Androi
 | Game disks, complete DOS folders, and game-specific drivers | Supplied by the player, including launch scripts and resident programs |
 | PC-88 BASIC, floppy, character, and kanji ROMs | Bundled for the six supported BASIC modes |
 | PC-98 compatible BIOS, standard font, and default sound BIOS | Supplied by the core and APK for the default configuration |
-| DOS system | Bundled by default from 0.26.4, with support for importing alternative templates |
+| DOS system | Bundled FreeDOS(98), with support for importing alternative PC-98 HDI templates |
 | SF2 soundfont | Imported by the player when enabling MIDI |
 | Fonts for translations or custom character mappings | Supplied with the game; standard fonts are bundled |
 | Other sound BIOS, PC-88 dictionary, or expansion ROMs | Needed only by software or configurations that use them |
@@ -141,7 +151,7 @@ The build uses Gradle Wrapper 9.1.0, AGP 9.0.0, Kotlin/Compose compiler 2.2.10, 
 
 Restore the original `.cache/signing/development.jks` for an upgrade. For a new project, create your own RSA keystore at that path with alias `necmobile` and development password `android`. Private keys are excluded from source archives.
 
-The default build packages the DOS template at `app/src/main/assets/dos/default.hdi.gz`.
+The default build includes FreeDOS(98). To package your own MS-DOS resources locally, run `scripts/build.py --bundle-dos --dos-assets <asset-directory>` with the DOS files in its `dos/` subdirectory. The [Chinese build guide](README.md) lists the supported asset names.
 
 ### Source archive
 
@@ -168,4 +178,4 @@ The library and settings use Kotlin with Compose / Material 3; business logic an
 - The PC-98 core is based on NP2kai. [NP2kai](https://github.com/libretro/NP2kai)
 - MIDI synthesis uses TinySoundFont v0.9 under the MIT license. [TinySoundFont](https://github.com/schellingb/TinySoundFont)
 
-Original component copyright notices and licenses are stored in the app's assets and can also be viewed through **设置 → 来源与许可**. [License index](LICENSE.md) · [License files](app/src/main/assets/licenses/)
+The original NEC Mobile code uses GPL version 2. The license index lists third-party terms and the linking exception. [License index](LICENSE.md) · [FreeDOS(98) source](third_party/freedos98/README.md)

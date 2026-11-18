@@ -307,7 +307,7 @@ static void key(int code, bool pressed) { if (keyboard) keyboard->key(code, pres
 static void mouse(int dx, int dy, unsigned buttons) { if (machine) machine->mouse(dx, dy, buttons); }
 static bool enableMouse(bool enabled) { return machine && machine->enableMouse(enabled); }
 static unsigned mouseReads() { return PC8801::AndroidMouseReads; }
-static bool mount(int drive, const char* path, int index) {
+static bool mount(int drive, const char* path, int index, bool) {
     if (!disks || drive < 0 || drive > 1 || index < 0 || index >= 64 || !flush()) return false;
     if (!*path) return disks->Unmount(drive);
     return disks->Mount(drive, path, false, index, false);

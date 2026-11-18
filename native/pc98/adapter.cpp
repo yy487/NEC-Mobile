@@ -32,6 +32,7 @@ static void (*configureSoundBios)(bool);
 static const char* (*soundRomName)();
 static const char* (*fontResource)();
 static unsigned (*readMouseCounter)();
+static void (*configureMedia)(const char*, const char*, bool);
 static void (*completeMedia)();
 static const char* (*floppyPath)(unsigned);
 static NecHost host{};
@@ -198,6 +199,7 @@ static void closeCore() {
     completeMedia = nullptr; floppyPath = nullptr;
     fontResource = nullptr;
     readMouseCounter = nullptr;
+    configureMedia = nullptr;
     loaded = initialized = false;
     disks = {};
     media.clear();
@@ -217,10 +219,11 @@ static bool openCore(const char* directory, const char* disk, const char* second
     options["np2kai_SNDboard"] = "PC9801-86";
     options["np2kai_joymode"] = "OFF";
     options["np2kai_stick2mouse"] = "OFF";
-    for (const auto& entry : readMachineConfig(directory))
+    MachineConfig startup = readMachineConfig(directory);
+    for (const auto& entry : startup)
         if (entry.first.compare(0,7,"np2kai_")==0) options[entry.first]=entry.second;
     variablesChanged = false;
-    midiEnabled = machineText(readMachineConfig(directory),"midi_enabled","OFF")=="ON";
+    midiEnabled = machineText(startup,"midi_enabled","OFF")=="ON";
     mouseX = mouseY = polledX = polledY = 0;
     mouseButtons = 0;
     pixelFormat = RETRO_PIXEL_FORMAT_0RGB1555;
@@ -240,14 +243,24 @@ static bool openCore(const char* directory, const char* disk, const char* second
     soundRomName = reinterpret_cast<decltype(soundRomName)>(dlsym(library,"necmobile_sound_rom"));
     fontResource = reinterpret_cast<decltype(fontResource)>(dlsym(library,"necmobile_font_resource"));
     readMouseCounter = reinterpret_cast<decltype(readMouseCounter)>(dlsym(library,"necmobile_mouse_read_count"));
+    configureMedia = reinterpret_cast<decltype(configureMedia)>(dlsym(library,"necmobile_configure_media"));
     completeMedia = reinterpret_cast<decltype(completeMedia)>(dlsym(library,"necmobile_complete_media"));
     floppyPath = reinterpret_cast<decltype(floppyPath)>(dlsym(library,"necmobile_floppy_path"));
-    if (!saveMachine || !checkMachine || !loadMachine || !configureMidi || !configureSoundBios || !soundRomName || !fontResource || !completeMedia || !floppyPath || !readMouseCounter) {
+    if (!saveMachine || !checkMachine || !loadMachine || !configureMidi || !configureSoundBios || !soundRomName || !fontResource || !completeMedia || !floppyPath || !readMouseCounter || !configureMedia) {
         host.message("PC-98 core bridge missing"); closeCore(); return false;
     }
     configureMidi(midiEnabled);
-    bool soundBiosEnabled = machineText(readMachineConfig(directory),"pc98_sound_bios","ON")=="ON";
+    bool soundBiosEnabled = machineText(startup,"pc98_sound_bios","ON")=="ON";
     configureSoundBios(soundBiosEnabled);
+    std::string legacyPath = disk;
+    size_t dot = legacyPath.find_last_of('.');
+    std::string extension = dot == std::string::npos ? "" : legacyPath.substr(dot);
+    for (char& letter : extension) if (letter >= 'A' && letter <= 'Z') letter += 'a' - 'A';
+    bool legacyHard = extension == ".hdi" || extension == ".nhd" || extension == ".thd" || extension == ".hdd";
+    std::string floppyA = machineText(startup, "startup_floppy_a", legacyHard ? "" : disk);
+    std::string floppyB = machineText(startup, "startup_floppy_b", secondDisk);
+    std::string hardDisk = machineText(startup, "startup_hard_disk", legacyHard ? disk : "");
+    configureMedia(floppyA.c_str(), floppyB.c_str(), machineText(startup, "startup_boot_device", hardDisk.empty() ? "floppy" : "hdd") == "hdd");
     p_retro_set_environment(environment);
     p_retro_set_video_refresh(video);
     p_retro_set_audio_sample(audioSample);
@@ -256,19 +269,24 @@ static bool openCore(const char* directory, const char* disk, const char* second
     p_retro_set_input_state(input);
     p_retro_init();
     initialized = true;
-    std::string bootPath = disk;
-    if (*secondDisk) {
+    std::vector<std::string> startupPaths;
+    if (!hardDisk.empty()) startupPaths.push_back(hardDisk);
+    if (!floppyA.empty()) startupPaths.push_back(floppyA);
+    if (!floppyB.empty()) startupPaths.push_back(floppyB);
+    std::string bootPath = startupPaths.empty() ? "" : startupPaths.front();
+    if (startupPaths.size() > 1) {
         bootPath = systemDirectory + "/dual-floppy.cmd";
         std::ofstream command(bootPath, std::ios::trunc);
-        command << "np2kai \"" << disk << "\" \"" << secondDisk << "\"\n";
+        command << "np2kai";
+        for (const std::string& path : startupPaths) command << " \"" << path << "\"";
+        command << "\n";
         command.close();
         if (!command) { host.message("Cannot prepare the two-drive boot configuration"); closeCore(); return false; }
     }
     retro_game_info game{bootPath.c_str(), nullptr, 0, nullptr};
-    loaded = p_retro_load_game(*disk ? &game : nullptr);
+    loaded = p_retro_load_game(!bootPath.empty() ? &game : nullptr);
     if (!loaded) { closeCore(); return false; }
-    if (*disk) media.insert(disk);
-    if (*secondDisk) media.insert(secondDisk);
+    for (const std::string& path : startupPaths) media.insert(path);
     // NP2kai creates its machine on the first run call, before AV geometry is valid.
     p_retro_run();
     completeMedia();
@@ -291,13 +309,20 @@ static void key(int code, bool pressed) { if (code >= 0 && unsigned(code) < keys
 static void mouse(int dx, int dy, unsigned buttons) {
     mouseX += dx; mouseY += dy; mouseButtons = buttons;
 }
-static bool mount(int drive, const char* path, int index) {
+static bool mount(int drive, const char* path, int index, bool duringPlay) {
     if (drive < 0 || drive > 1 || index != 0 || !setFloppy) return false;
     if (!flush()) return false;
     const char* old = floppyPath(drive);
     std::string previous = old ? old : "";
     if (!setFloppy(drive, *path ? path : nullptr)) return false;
-    completeMedia();
+    if (duringPlay && *path && !previous.empty()) {
+        // The guest must see the empty drive during NP2kai's 20-frame media change.
+        for (unsigned frame = 0; frame < 40; ++frame) {
+            const char* mounted = floppyPath(drive);
+            if (mounted && *mounted) break;
+            p_retro_run();
+        }
+    } else completeMedia();
     const char* actual = floppyPath(drive);
     if (std::string(actual ? actual : "") != path) {
         setFloppy(drive, previous.empty() ? nullptr : previous.c_str());

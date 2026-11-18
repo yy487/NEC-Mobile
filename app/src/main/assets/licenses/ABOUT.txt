@@ -1,5 +1,10 @@
 NEC Mobile
 
+The original NEC Mobile application, integration code and build scripts use
+GNU GPL version 2 with an exception for M88, FMGEN, AndroidX and the Kotlin
+runtime. See COPYING and LICENSE.md in the accompanying source package.
+The GPL text is available in FreeDOS-GPL.txt.
+
 PC-88 core: M88 by cisc; source reference rururutan/m88.
 Changes: Android/ARM64 platform layer, C++ Z80 selection, portable compiler syntax,
 file I/O, display, PCM audio and emulated keyboard integration;

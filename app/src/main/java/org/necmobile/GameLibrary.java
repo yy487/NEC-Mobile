@@ -27,6 +27,10 @@ final class GameLibrary {
         long played;
         String fontSelection = "", firmwareRevision = "", lastMachineInfo = "", kind = "disk";
         boolean resumeEnabled;
+        String startupPolicy = "auto", startupSystem = "auto", startupEntry = "", startupInstance = "", startupHint = "";
+        String hardDisk = "", bootDevice = "auto", startupSource = "", startupMemory = "none";
+        boolean startupReady;
+        final Map<String, GeneratedMedia> generatedMedia = new LinkedHashMap<>();
         int mode, firstIndex, secondIndex;
         final Map<String,String> machineOptions = new LinkedHashMap<>();
         final List<Library.Disk> media = new ArrayList<>();
@@ -41,6 +45,14 @@ final class GameLibrary {
         Media(Library.Disk disk, int index) { this.disk = disk; this.index = index; }
         String label() { return disk.label(index); }
         boolean same(Media other) { return other != null && index == other.index && disk.file.equals(other.disk.file); }
+    }
+    static final class GeneratedMedia {
+        final String role, template, configuration;
+        final int version;
+        GeneratedMedia(String role, String template, int version) { this(role, template, version, ""); }
+        GeneratedMedia(String role, String template, int version, String configuration) {
+            this.role = role; this.template = template; this.version = version; this.configuration = configuration;
+        }
     }
     static List<Media> media(Game game) {
         List<Media> result = new ArrayList<>();
@@ -100,11 +112,18 @@ final class GameLibrary {
             game.name = row.getString("name"); game.source = row.optString("source");
             game.first = row.optString("first"); game.second = row.optString("second");
             game.firstIndex = row.optInt("firstIndex"); game.secondIndex = row.optInt("secondIndex");
+            game.hardDisk = row.optString("hardDisk"); game.bootDevice = row.optString("bootDevice", "auto");
             game.played = row.optLong("played"); game.mode = MachineOptions.bootMode(platform, row.optInt("mode"));
             game.fontSelection = row.optString("fontSelection");
             game.firmwareRevision = row.optString("firmwareRevision");
             game.lastMachineInfo = row.optString("lastMachineInfo");
             game.kind = row.optString("kind", "disk"); game.resumeEnabled = row.optBoolean("resumeEnabled");
+            game.startupPolicy = row.optString("startupPolicy", "existing");
+            game.startupSystem = row.optString("startupSystem", "auto");
+            game.startupEntry = row.optString("startupEntry"); game.startupInstance = row.optString("startupInstance");
+            game.startupHint = row.optString("startupHint");
+            game.startupSource = row.optString("startupSource"); game.startupMemory = row.optString("startupMemory", "none");
+            game.startupReady = row.optBoolean("startupReady", !game.first.isEmpty());
             JSONObject settings=row.optJSONObject("machineOptions");
             if (settings!=null) for (MachineOptions.Option option : MachineOptions.all(platform)) {
                 String value=settings.optString(option.key,null);
@@ -120,6 +139,9 @@ final class GameLibrary {
                     for (int j = 0; j < stored.length(); j++) titles.add(stored.getString(j));
                 else titles.addAll(platform == 88 && image.isFile() ? D88.titles(image) : Collections.singletonList(""));
                 game.media.add(new Library.Disk(disk.getString("name"), image, titles));
+                JSONObject generated = disk.optJSONObject("generated");
+                if (generated != null) game.generatedMedia.put(image.getName(), new GeneratedMedia(
+                        generated.getString("role"), generated.getString("template"), generated.optInt("version", 1), generated.optString("configuration")));
             }
             // Older records could not express a second disk inside the same file.
             if (platform == 88 && !row.has("firstIndex") && game.second.isEmpty() && game.disk(game.first) != null && game.disk(game.first).titles.size() > 1) {
@@ -136,14 +158,27 @@ final class GameLibrary {
             row.put("id", game.id); row.put("name", game.name); row.put("source", game.source);
             row.put("first", game.first); row.put("second", game.second);
             row.put("firstIndex", game.firstIndex); row.put("secondIndex", game.secondIndex);
+            row.put("hardDisk", game.hardDisk); row.put("bootDevice", game.bootDevice);
             row.put("played", game.played); row.put("mode", game.mode);
             row.put("machineOptions",new JSONObject(game.machineOptions));
             row.put("fontSelection", game.fontSelection); row.put("firmwareRevision", game.firmwareRevision);
             row.put("lastMachineInfo", game.lastMachineInfo); row.put("kind", game.kind); row.put("resumeEnabled", game.resumeEnabled);
+            row.put("startupPolicy", game.startupPolicy); row.put("startupSystem", game.startupSystem);
+            row.put("startupEntry", game.startupEntry); row.put("startupInstance", game.startupInstance);
+            row.put("startupHint", game.startupHint); row.put("startupReady", game.startupReady);
+            row.put("startupSource", game.startupSource); row.put("startupMemory", game.startupMemory);
             JSONArray media = new JSONArray();
             for (Library.Disk disk : game.media) {
                 JSONObject entry = new JSONObject(); entry.put("name", disk.name); entry.put("path", relative(disk.file));
-                entry.put("titles", new JSONArray(disk.titles)); media.put(entry);
+                entry.put("titles", new JSONArray(disk.titles));
+                GeneratedMedia generated = game.generatedMedia.get(disk.file.getName());
+                if (generated != null) {
+                    JSONObject details = new JSONObject(); details.put("role", generated.role);
+                    details.put("template", generated.template); details.put("version", generated.version);
+                    details.put("configuration", generated.configuration);
+                    entry.put("generated", details);
+                }
+                media.put(entry);
             }
             row.put("media", media); array.put(row);
         }
@@ -178,6 +213,9 @@ final class GameLibrary {
         game.media.sort(Comparator.comparing(disk -> disk.name.toLowerCase(Locale.ROOT)));
         if (game.media.isEmpty()) return;
         Library.Disk boot = game.media.get(0);
+        if (platform == 98) {
+            for (Library.Disk disk : game.media) if (hardDisk(disk)) { game.hardDisk = disk.file.getName(); break; }
+        }
         if (platform == 98 && !hardDisk(boot)) {
             for (Library.Disk disk : game.media) {
                 if (!hardDisk(disk) && stem(disk.name).matches("(?i)(?:.*[ ._-])?(?:s|system|boot)")) {
@@ -188,6 +226,14 @@ final class GameLibrary {
         }
         game.first = boot.file.getName();
         game.firstIndex = game.secondIndex = 0; game.second = "";
+        if (platform == 98 && hardDisk(boot)) {
+            game.bootDevice = "hdd";
+            for (Library.Disk disk : game.media) if (!hardDisk(disk)) {
+                if (game.first.equals(boot.file.getName())) game.first = disk.file.getName();
+                else { game.second = disk.file.getName(); break; }
+            }
+            return;
+        }
         if (boot.titles.size() > 1) {
             game.second = game.first; game.secondIndex = 1; return;
         }
@@ -250,7 +296,12 @@ final class GameLibrary {
     }
     private Game finish(Game game) throws Exception {
         if (game.media.isEmpty()) throw new IOException("没有找到此平台支持的磁盘镜像");
-        arrange(game); save(game); return game;
+        arrange(game);
+        if (platform == 98) {
+            try { new BootEnvironment(context, this).prepare(game, false); }
+            catch (Exception error) { game.startupReady = false; game.startupHint = error.getMessage(); }
+        }
+        save(game); return game;
     }
     Game importZip(Uri uri) throws Exception {
         Game existing = source(uri.toString()); if (existing != null) return existing;
@@ -367,6 +418,13 @@ final class GameLibrary {
         AtomicFile settings = new AtomicFile(new File(directory(game),"machine.cfg"));
         String configuration=MachineOptions.encode(platform,game.machineOptions,game.mode);
         configuration += HostAudio.encode(context);
+        if (platform == 98) {
+            configuration += "startup_floppy_a=" + mediaPath(game, launchMedia.floppyA) + "\n";
+            configuration += "startup_floppy_b=" + mediaPath(game, launchMedia.floppyB) + "\n";
+            configuration += "startup_hard_disk=" + mediaPath(game, launchMedia.hardDisk) + "\n";
+            configuration += "startup_boot_device=" + launchMedia.bootDevice + "\n";
+            configuration += "startup_font=" + game.fontSelection + "\n";
+        }
         if (!game.firmwareRevision.isEmpty()) configuration += "firmware_revision=" + game.firmwareRevision + "\n";
         if (configuration.contains("midi_enabled=ON\n")) {
             File soundfont=new SoundFonts(context).selected();
@@ -378,8 +436,68 @@ final class GameLibrary {
         catch (Exception error) { settings.failWrite(output); throw error; }
         return new PreparedLaunch(game, platform, directory(game), launchMedia, resourceWarning);
     }
+    private String mediaPath(Game game, LaunchMedia.Ref ref) {
+        return ref == null ? "" : game.disk(ref.file).file.getAbsolutePath();
+    }
     void saveLaunchDefaults(String id, LaunchMedia media) throws Exception {
-        updateGame(id, current -> { media.validate(current, platform); media.applyDefaults(current); });
+        updateGame(id, current -> {
+            media.validate(current, platform); media.applyDefaults(current);
+            current.startupReady = true;
+        });
+    }
+    Game prepareStartup(String id, String system) throws Exception {
+        Game game = find(id);
+        if (game == null) throw new IOException("找不到本游戏记录");
+        return prepareStartup(id, system, game.startupMemory, game.startupSource, game.startupEntry);
+    }
+    Game prepareStartup(String id, String system, String memory, String source, String entry) throws Exception {
+        Game work = find(id);
+        if (work == null) throw new IOException("找不到本游戏记录");
+        if (platform != 98) throw new IOException("DOS 启动环境用于 PC-98");
+        if (!Arrays.asList(BootEnvironment.SYSTEMS).contains(system)) throw new IOException("启动环境无效");
+        work.startupPolicy = system.equals("existing") ? "existing" : "auto";
+        work.startupSystem = system.equals("existing") ? "auto" : system;
+        work.startupMemory = memory; work.startupSource = source; work.startupEntry = entry.trim();
+        Set<String> previous = new HashSet<>();
+        for (Library.Disk disk : work.media) previous.add(disk.file.getName());
+        if (system.equals("existing")) work.startupReady = !work.first.isEmpty() || !work.hardDisk.isEmpty();
+        else new BootEnvironment(context, this).prepare(work, true);
+        try { updateGame(id, current -> {
+            for (Library.Disk disk : work.media) if (!previous.contains(disk.file.getName()) && work.generatedMedia.containsKey(disk.file.getName()) && current.disk(disk.file.getName()) == null)
+                current.media.add(disk);
+            for (Library.Disk disk : current.media) {
+                GeneratedMedia generated = work.generatedMedia.get(disk.file.getName());
+                if (generated != null) current.generatedMedia.put(disk.file.getName(), generated);
+            }
+            current.first = work.first; current.second = work.second;
+            current.hardDisk = work.hardDisk; current.bootDevice = work.bootDevice;
+            current.firstIndex = work.firstIndex; current.secondIndex = work.secondIndex;
+            current.startupPolicy = work.startupPolicy; current.startupSystem = work.startupSystem;
+            current.startupEntry = work.startupEntry; current.startupInstance = work.startupInstance;
+            current.startupHint = work.startupHint; current.startupReady = work.startupReady;
+            current.startupSource = work.startupSource; current.startupMemory = work.startupMemory;
+            if (current.startupReady) LaunchMedia.defaults(current).validate(current, platform);
+        }); } catch (Exception error) {
+            for (Library.Disk disk : work.media) if (!previous.contains(disk.file.getName())) disk.file.delete();
+            throw error;
+        }
+        return find(id);
+    }
+    Library.Disk createSaveDisk(String id, String name) throws Exception {
+        Game game = find(id);
+        if (game == null) throw new IOException("找不到本游戏记录");
+        if (platform != 98) throw new IOException("请选择 PC-98 存档盘格式");
+        return new BootEnvironment(context, this).createSave(game, name);
+    }
+    Library.Disk createToolDisk(String id) throws Exception {
+        Game game = find(id);
+        if (game == null) throw new IOException("找不到本游戏记录");
+        if (platform != 98) throw new IOException("DOS 工具盘用于 PC-98");
+        for (Library.Disk disk : game.media) {
+            GeneratedMedia generated = game.generatedMedia.get(disk.file.getName());
+            if (generated != null && generated.role.equals("tools") && disk.file.isFile()) return disk;
+        }
+        return new BootEnvironment(context, this).createTools(game);
     }
     void repairDiskNames(String id, Map<String, String> selected) throws Exception {
         updateGame(id, game -> {
@@ -393,7 +511,10 @@ final class GameLibrary {
     }
     void recordStarted(String id, LaunchMedia media, boolean remember, String info) throws Exception {
         updateGame(id, current -> {
-            if (remember) { media.validate(current, platform); media.applyDefaults(current); }
+            if (remember) {
+                media.validate(current, platform); media.applyDefaults(current);
+                current.startupReady = true;
+            }
             current.lastMachineInfo = info == null ? "" : info;
             current.played = System.currentTimeMillis();
         });
@@ -437,8 +558,10 @@ final class GameLibrary {
         List<Game> games = readGames();
         for (Game current : games) if (current.id.equals(game.id)) {
             String file = disk.file.getName();
-            if (file.equals(current.first) || file.equals(current.second)) throw new IOException("这张盘正在用于启动，请先更换默认盘位，再移除文件。");
+            if (file.equals(current.first) || file.equals(current.second) || file.equals(current.hardDisk)) throw new IOException("这张盘正在用于启动，请先更换默认盘位，再移除文件。");
+            if (new StateSlots(directory(current)).references(current, platform, disk.file)) throw new IOException("即时档仍在使用这张盘，请先删除引用它的存档槽。");
             current.media.removeIf(item -> item.file.equals(disk.file));
+            current.generatedMedia.remove(file);
         }
         write(games);
         for (Game other : games) for (Library.Disk kept : other.media)

@@ -1,10 +1,33 @@
-Bundled PC-98 DOS system template
+PC-98 DOS resources in NEC Mobile
 
-This template contains Microsoft MS-DOS 5.00 system files from the PC-98 disk
-image supplied for this project. It includes IO.SYS, MSDOS.SYS, COMMAND.COM,
-HIMEM.SYS, CONFIG.SYS and AUTOEXEC.BAT. The system binaries include their
-original copyright text.
+The standard build uses FreeDOS(98). KERNEL.SYS and SYS.COM come from
+lpproj/fdkernel release test-20220120-cherrypick, distributed in
+fd98_2hd144_20220123.zip. KERNEL.SYS is copyright (C) 1995-2022
+Pasquale J. Villani and The FreeDOS Project and (C) 2001-2022
+the FreeDOS(98) porting project.
+https://github.com/lpproj/fdkernel/releases/tag/test-20220120-cherrypick
 
-NEC Mobile supplies a system-only template with boot configuration for its
-per-game hard disks. The application copies the template into writable game
-storage before importing the game's files and startup script.
+COMMAND.COM is the Japanese PC-98 build from lpproj/freecom_dbcs2
+release dbcswip-20220117. It is the nec98/japanese/command.upx binary
+in freecom_dbcswip-20220117-bin.zip.
+Copyright (C) 1994-2005 Tim Norman and others.
+Copyright (C) 2001 SUZU, Silphire.
+Copyright (C) 2002 tori.
+The PC-98 DBCS edition includes changes by lpproj and its contributors.
+https://github.com/lpproj/freecom_dbcs2/releases/tag/dbcswip-20220117
+
+The kernel and command shell are licensed under GPL version 2 or later.
+Their license text is available in FreeDOS-GPL.txt. The matching upstream
+source archives are provided under third_party/freedos98 of NEC Mobile.
+https://github.com/yy487/NEC-Mobile
+
+The templates use the FreeDOS floppy boot record and the hard-disk IPL
+and boot record from the same FreeDOS(98) release. The IPL is described
+as public-domain code by the upstream BTNPART.TXT notice. NEC Mobile
+prepared a compact FAT16 hard disk and a minimal boot floppy. The app
+writes the launch script into a separate game-specific copy.
+
+Local builds may also include the builder's PC-98 MS-DOS 2.1, 3.3D,
+5.0A and 6.2 startup disks, MS-DOS 5.00 HDI, and MS-DOS 6.2 drivers
+and maintenance programs supplied by the builder. These retain their
+original Microsoft and NEC copyright notices.
