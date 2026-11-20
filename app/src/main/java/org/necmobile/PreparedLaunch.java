@@ -21,7 +21,6 @@ final class PreparedLaunch {
         intent.putExtra("gameId", game.id); intent.putExtra("gameName", game.name);
         intent.putExtra("directory", directory.getAbsolutePath());
         intent.putExtra("resourceWarning", warning);
-        intent.putExtra("resumeEnabled", game.resumeEnabled);
         intent.putExtra("displayAspect", game.machineOptions.getOrDefault("display_aspect", "4:3"));
         intent.putExtra("displayOrientation", game.machineOptions.getOrDefault("display_orientation", "AUTO"));
         intent.putExtra("disk", first == null ? "" : game.disk(first.file).file.getAbsolutePath());

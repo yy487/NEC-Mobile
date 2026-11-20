@@ -4,20 +4,21 @@
 
 Play PC-88 and PC-98 games on Android. NEC Mobile brings the M88 PC-88 core and the NP2kai PC-98 core into one app, with separate game libraries, resources, and machine settings for each platform.
 
-Version **0.26.6**, for **ARM64 devices running Android 8.0 or later**.
+Version **0.26.8**, for **ARM64 devices running Android 8.0 or later**.
 
-- Android APK `NEC-Mobile-0.26.6-arm64.apk`
-- Source archive `NEC-Mobile-0.26.6-sources.zip`
+- Android APK `NEC-Mobile-0.26.8-arm64.apk`
+- Source archive `NEC-Mobile-0.26.8-sources.zip`
 
 ## Features
 
-- Import each game from a folder or ZIP and manage its disks, cover, and last-played time from a game card.
+- Import multiple disk images, folders, or ZIPs, and browse a compact library with covers, play time, name search, and media filters.
 - Swap and eject floppy disks during play, including multiple disks embedded in a PC-88 D88 file.
 - Relative touchpad mouse, on-screen keyboard, physical keyboard input, and automatic screen rotation.
 - Per-game machine, CPU, memory, sound board, and mixer settings.
-- Six manual save-state slots per game.
+- Six manual save-state slots per game, plus separate quick-save and automatic session slots.
 - SF2 MIDI synthesis and audio recovery after backgrounding or output-device changes.
-- Compose / Material 3 platform entry, separate settings pages, and a launch-media sheet.
+- A dark-green Compose / Material 3 interface with platform switching, a recent-game card, game management, and launch-media sheets.
+- The **最近更新** tab displays current and historical release notes, copied from CHANGELOG during the build.
 - An independent automatic session slot, speed and aspect controls, and phone audio settings.
 - Import PC-98 DOS folders into private HDI disks and select FREECG98.BMP fonts.
 
@@ -25,12 +26,12 @@ Version **0.26.6**, for **ARM64 devices running Android 8.0 or later**.
 
 Menu labels below match the app's Chinese interface.
 
-1. Install the APK, open the app, and select **PC-88** or **PC-98**.
-2. The app supplies default boot firmware and fonts. Import game-specific firmware through **设置 → 导入系统 ROM / 字库**, or include it in the game's folder or ZIP.
-3. Select **添加游戏** and choose a folder or ZIP containing one game and its complete disk set.
-4. Tap a game card to start. Edit **游戏管理 → 启动环境与盘位** for PC-98, or **默认盘位** for PC-88. Floppy A, floppy B and the hard disk have independent slots, with a selectable boot device.
+1. Install the APK and use the top **PC-88 / PC-98** selector. The app remembers the last platform.
+2. The app supplies default boot firmware and fonts. Import game-specific firmware through **设置 → 系统 ROM / 字库**, or include it in the game's folder or ZIP.
+3. Use **添加游戏 → 选择镜像** to select a game's disk set and enter its name. Folder, ZIP, and PC-98 DOS-directory import options are also available.
+4. Use the list's play button to start, then choose resume or restart when a session exists. Tap a title or its menu to manage the game. Edit **启动环境与盘位** for PC-98, or **默认盘位** for PC-88. Floppy A, floppy B, and the hard disk have independent slots and a selectable boot device.
 
-The app stores game progress in imported disk copies. Tapping the card again boots the machine with the saved disk selection.
+The app stores game progress in imported disk copies. The recent-game card offers resume or startup.
 
 | Platform | Accepted disk formats |
 | --- | --- |
@@ -38,7 +39,7 @@ The app stores game progress in imported disk copies. Tapping the card again boo
 | PC-98 floppy | D88, 88D, FDI, XDF, HDM |
 | PC-98 hard disk | HDI, NHD, HDD, THD, loaded through the boot configuration |
 
-The game card's **管理** menu provides renaming, machine and sound settings, disk export, and removal. For a cover, use a PNG, JPEG, or WebP image named `cover`, `folder`, `front`, or `title`. You can also capture the current game screen through **菜单 → 更多设置 → 将当前画面设为封面**.
+**游戏管理** provides renaming, machine and sound settings, disk export, and removal. For a cover, use a PNG, JPEG, or WebP image named `cover`, `folder`, `front`, or `title`. You can also capture the current game screen through **菜单 → 更多设置 → 将当前画面设为封面**.
 
 ## Controls
 
@@ -57,7 +58,7 @@ Choose automatic configuration, virtual mouse, or swipe keys through **菜单 �
 | Use the bottom-left mouse buttons | Click or hold a button while sliding with another finger |
 | Tap 确认 / 空格 / 键盘 | Send Enter, send Space, or open the on-screen keyboard |
 
-In swipe-key mode, each up/down/left/right gesture sends one keypad 2/4/6/8 or arrow key. A one-finger tap sends the selected Enter or Space key, and a two-finger tap sends the other confirmation key. Use the on-screen keyboard for number choices and other controls. Choose automatic rotation, landscape, or portrait through **菜单 → 屏幕方向**.
+In swipe-key mode, each up/down/left/right gesture first sends one keypad 2/4/6/8 or arrow key. Keep touching for 420 ms to hold the direction, lift to release, or swipe in another direction to turn. A one-finger tap sends the selected Enter or Space key, and a two-finger tap sends the other confirmation key. The expanded tool ball has a central close button surrounded by Enter, Esc, Space, quick save, quick load, keyboard, control mode, and menu. Choose automatic rotation, landscape, or portrait through **菜单 → 屏幕方向**.
 
 The game pauses when the app moves to the background or loses audio focus. It resumes in the foreground once audio focus is available and manual pause is off. After headphones disconnect, select **继续运行** from the menu. To restart audio output manually, use **菜单 → 更多设置 → 恢复声音输出**.
 
@@ -79,11 +80,17 @@ Loading a state restores its disk selection. A different machine or hard-disk en
 
 To keep in-game saves, export the relevant disk through **管理 → 管理磁盘文件 → 导出磁盘副本**. Removing a game or uninstalling the app deletes its app-managed disks and save states.
 
-Enable automatic session saving in **游戏管理 → 系统设置** to save when backgrounding or exiting normally. Select **继续会话** on the card to resume. This slot is separate from the six manual slots. A failed restore shows its cause and leaves normal startup available.
+Use **快存** and **快读** on the tool ball to overwrite or load the game's independent quick slot directly.
+
+Backgrounding and normal exit automatically save the session. The next **启动** asks whether to resume or restart. Resume restores the machine and mounted media, while restart boots with the default media.
+
+Cards show accumulated foreground running time. Pauses, menus, state operations, and background time are excluded. The in-game menu also shows the current session's duration. Existing games begin accumulating time after this update.
+
+Open **设置 → 数据占用与清理** to view disk, state, resource, template, and temporary-file usage. Successful DOS-to-HDI imports remove their staged source files, and overwriting a state reclaims its old snapshot. The cleanup action removes historical import copies, abandoned imports, and unreferenced snapshots.
 
 ## Machine, sound, and MIDI settings
 
-Open **游戏管理 → 系统设置** from the game card. Changes take effect the next time you start the game.
+Open **游戏管理 → 完整机器设置** from the game card. Changes take effect the next time you start the game.
 
 - **PC-88** offers N88-V1(S), N88-V1(H), N88-V2, N, N80, and N80-V2 modes, 4/8 MHz operation, expansion memory, OPN/OPNA, and FM, SSG, ADPCM, and rhythm levels.
 - **PC-98** offers VX/VM/PC-286 models, CPU/FPU profiles, memory settings, and sound boards such as the 86, 26K, 118, and SB16 with board combinations. Mixer controls cover FM, SSG, ADPCM, PCM, rhythm, and BEEP.

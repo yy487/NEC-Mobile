@@ -24,9 +24,9 @@ final class GameLibrary {
     private static final long DISK_LIMIT = 4L * 1024 * 1024 * 1024;
     static final class Game {
         String id = UUID.randomUUID().toString(), name, source = "", first = "", second = "";
-        long played;
+        long played, playTimeMillis, sessionPlayMillis;
+        String playSession = "";
         String fontSelection = "", firmwareRevision = "", lastMachineInfo = "", kind = "disk";
-        boolean resumeEnabled;
         String startupPolicy = "auto", startupSystem = "auto", startupEntry = "", startupInstance = "", startupHint = "";
         String hardDisk = "", bootDevice = "auto", startupSource = "", startupMemory = "none";
         boolean startupReady;
@@ -114,10 +114,13 @@ final class GameLibrary {
             game.firstIndex = row.optInt("firstIndex"); game.secondIndex = row.optInt("secondIndex");
             game.hardDisk = row.optString("hardDisk"); game.bootDevice = row.optString("bootDevice", "auto");
             game.played = row.optLong("played"); game.mode = MachineOptions.bootMode(platform, row.optInt("mode"));
+            game.playTimeMillis = Math.max(0, row.optLong("playTimeMillis"));
+            game.playSession = row.optString("playSession");
+            game.sessionPlayMillis = Math.max(0, row.optLong("sessionPlayMillis"));
             game.fontSelection = row.optString("fontSelection");
             game.firmwareRevision = row.optString("firmwareRevision");
             game.lastMachineInfo = row.optString("lastMachineInfo");
-            game.kind = row.optString("kind", "disk"); game.resumeEnabled = row.optBoolean("resumeEnabled");
+            game.kind = row.optString("kind", "disk");
             game.startupPolicy = row.optString("startupPolicy", "existing");
             game.startupSystem = row.optString("startupSystem", "auto");
             game.startupEntry = row.optString("startupEntry"); game.startupInstance = row.optString("startupInstance");
@@ -160,9 +163,11 @@ final class GameLibrary {
             row.put("firstIndex", game.firstIndex); row.put("secondIndex", game.secondIndex);
             row.put("hardDisk", game.hardDisk); row.put("bootDevice", game.bootDevice);
             row.put("played", game.played); row.put("mode", game.mode);
+            row.put("playTimeMillis", game.playTimeMillis); row.put("playSession", game.playSession);
+            row.put("sessionPlayMillis", game.sessionPlayMillis);
             row.put("machineOptions",new JSONObject(game.machineOptions));
             row.put("fontSelection", game.fontSelection); row.put("firmwareRevision", game.firmwareRevision);
-            row.put("lastMachineInfo", game.lastMachineInfo); row.put("kind", game.kind); row.put("resumeEnabled", game.resumeEnabled);
+            row.put("lastMachineInfo", game.lastMachineInfo); row.put("kind", game.kind);
             row.put("startupPolicy", game.startupPolicy); row.put("startupSystem", game.startupSystem);
             row.put("startupEntry", game.startupEntry); row.put("startupInstance", game.startupInstance);
             row.put("startupHint", game.startupHint); row.put("startupReady", game.startupReady);
@@ -318,6 +323,31 @@ final class GameLibrary {
                     if (path.startsWith("/") || path.contains("../") || path.contains(":")) throw new IOException("游戏包路径无效");
                     bytes += addFile(game, path, zip, seen);
                     if (bytes > 8L * 1024 * 1024 * 1024) throw new IOException("游戏包过大");
+                }
+            }
+            return finish(game);
+        } catch (Exception error) { deleteTree(directory(game)); throw error; }
+    }
+    Game importImages(List<Uri> selected, String title) throws Exception {
+        List<Uri> images = new ArrayList<>(new LinkedHashSet<>(selected));
+        if (images.isEmpty() || images.size() > 512) throw new IOException("请选择单款游戏的磁盘镜像");
+        String name = title.trim();
+        if (name.isEmpty() || name.length() > 80) throw new IOException("名称需为 1–80 个字符");
+        List<String> locations = new ArrayList<>();
+        for (Uri uri : images) locations.add(uri.toString());
+        Collections.sort(locations);
+        String sourceId = "images\n" + String.join("\n", locations);
+        Game existing = source(sourceId); if (existing != null) return existing;
+        Game game = new Game(); game.name = name; game.source = sourceId;
+        long bytes = 0;
+        try {
+            for (Uri uri : images) {
+                String label = legacy.name(uri);
+                if (!image(label)) throw new IOException("PC-" + platform + " 不支持此镜像格式：" + label);
+                try (InputStream input = context.getContentResolver().openInputStream(uri)) {
+                    if (input == null) throw new IOException("无法读取：" + label);
+                    bytes += addFile(game, label, input, new HashSet<>());
+                    if (bytes > 8L * 1024 * 1024 * 1024) throw new IOException("游戏镜像总大小超过导入上限");
                 }
             }
             return finish(game);
@@ -517,6 +547,15 @@ final class GameLibrary {
             }
             current.lastMachineInfo = info == null ? "" : info;
             current.played = System.currentTimeMillis();
+        });
+    }
+    void recordPlayTime(String id, String session, long elapsed) throws Exception {
+        if (elapsed <= 0) return;
+        updateGame(id, game -> {
+            long previous = session.equals(game.playSession) ? game.sessionPlayMillis : 0;
+            game.playTimeMillis += Math.max(0, elapsed - previous);
+            game.playSession = session;
+            game.sessionPlayMillis = Math.max(previous, elapsed);
         });
     }
     void importGameResource(Game game, Uri uri) throws Exception {

@@ -281,6 +281,8 @@ final class DosLibrary {
             try { out.write(launch.toString(2).getBytes(StandardCharsets.UTF_8)); config.finishWrite(out); }
             catch (Exception error) { config.failWrite(out); throw error; }
             games.save(draft.game);
+            remove(draft.source);
+            new File(draft.directory, "import.zip").delete();
             return draft.game;
         } catch (Exception error) { temporary.delete(); throw error; }
     }

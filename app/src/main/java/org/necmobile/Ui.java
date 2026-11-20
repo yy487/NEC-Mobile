@@ -8,7 +8,7 @@ import android.view.View;
 import android.widget.*;
 
 final class Ui {
-    static final int BG = Color.rgb(16, 21, 31), CARD = Color.rgb(27, 35, 48), ACCENT = Color.rgb(118, 224, 192);
+    static final int BG = Color.rgb(22, 27, 25), CARD = Color.rgb(32, 39, 36), ACCENT = Color.rgb(199, 236, 170);
     static int dp(Activity activity, int value) { return Math.round(value * activity.getResources().getDisplayMetrics().density); }
     static TextView text(Activity activity, String label, int size, int color) {
         TextView view = new TextView(activity);

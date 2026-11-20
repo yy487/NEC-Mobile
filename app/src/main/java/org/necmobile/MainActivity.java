@@ -30,11 +30,13 @@ public final class MainActivity extends ComponentActivity {
     private boolean busy;
     private Library.Disk exporting;
     private String resourceGameId;
+    private List<Uri> pendingImages = new ArrayList<>();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         ui = new LibraryUi(this);
         setContentView(ui.createView());
+        selectPlatform(getSharedPreferences("library-ui", MODE_PRIVATE).getInt("platform", 98));
     }
     int currentPlatform() { ui.observe(); return platform; }
     boolean isWorking() { ui.observe(); return busy; }
@@ -44,8 +46,10 @@ public final class MainActivity extends ComponentActivity {
     boolean hasSession(String id) { ui.observe(); return sessions.contains(id); }
     void selectPlatform(int value) {
         if (busy) return;
+        if (value != 88 && value != 98) value = 98;
         platform = value;
-        games = value == 0 ? null : new GameLibrary(this, value);
+        getSharedPreferences("library-ui", MODE_PRIVATE).edit().putInt("platform", value).apply();
+        games = new GameLibrary(this, value);
         entries = new ArrayList<>(); covers = new HashMap<>(); progress = "";
         ui.changed(); refresh();
     }
@@ -73,7 +77,10 @@ public final class MainActivity extends ComponentActivity {
                     if (bitmap != null) images.put(game.id, bitmap);
                 }
                 runOnUiThread(() -> {
-                    if (games == selected && !isFinishing()) { entries = loaded; covers = images; sessions = resumable; ui.changed(); }
+                    if (games == selected && !isFinishing()) {
+                        entries = loaded; covers = images; sessions = resumable;
+                        ui.entriesChanged(loaded); ui.changed();
+                    }
                 });
             } catch (Exception exception) { runOnUiThread(() -> { if (games == selected) error(exception); }); }
         });
@@ -96,6 +103,13 @@ public final class MainActivity extends ComponentActivity {
     }
     void start(GameLibrary.Game game) {
         if (busy) return;
+        if (hasSession(game.id)) {
+            StateSlots slots = new StateSlots(games.directory(game));
+            ui.showChoices("继续上次游戏？", new String[]{"继续游戏 · " + slots.label(StateSlots.AUTO), "重新启动"}, -1,
+                    which -> { if (which == 0) continueSession(game); else startFresh(game); });
+        } else startFresh(game);
+    }
+    private void startFresh(GameLibrary.Game game) {
         if (game.startupReady) launch(game, LaunchMedia.defaults(game), false);
         else ui.openLaunch(game, false);
     }
@@ -147,13 +161,13 @@ public final class MainActivity extends ComponentActivity {
         GameLibrary selected = games;
         perform("正在保存默认盘位…", () -> { selected.saveLaunchDefaults(game.id, media); return true; }, ignored -> ui.launchSucceeded());
     }
-    void saveSettings(GameLibrary.Game displayed, int mode, Map<String, String> settings, String fontSelection, boolean resumeEnabled) {
+    void saveSettings(GameLibrary.Game displayed, int mode, Map<String, String> settings, String fontSelection) {
         GameLibrary selected = games;
         int selectedPlatform = platform;
         perform("正在保存系统设置…", () -> {
             selected.updateGame(displayed.id, game -> {
             game.mode = MachineOptions.bootMode(selectedPlatform, mode);
-            game.fontSelection = fontSelection; game.resumeEnabled = resumeEnabled;
+            game.fontSelection = fontSelection;
             game.machineOptions.clear();
             for (MachineOptions.Option option : MachineOptions.all(selectedPlatform)) {
                 String value = settings.get(option.key);
@@ -167,6 +181,28 @@ public final class MainActivity extends ComponentActivity {
             }
             return true;
         }, ignored -> { ui.closeSettings(); setProgress("系统设置已保存，下次启动生效"); });
+    }
+    void saveProfile(GameLibrary.Game displayed, String name, int mode, String model, boolean muted, boolean launchAfter) {
+        String title = name.trim();
+        if (title.isEmpty() || title.length() > 80) { error(new IOException("名称需为 1–80 个字符")); return; }
+        GameLibrary selected = games;
+        int selectedPlatform = platform;
+        perform("正在保存游戏配置…", () -> {
+            selected.updateGame(displayed.id, game -> {
+                game.name = title; game.mode = MachineOptions.bootMode(selectedPlatform, mode);
+                if (selectedPlatform == 98) {
+                    MachineOptions.Option option = MachineOptions.all(98).stream().filter(item -> item.key.equals("np2kai_model")).findFirst().get();
+                    if (!option.accepts(model)) throw new IOException("机型设置无效");
+                    game.machineOptions.put("np2kai_model", model);
+                }
+                if (muted) game.machineOptions.put("output_volume", "0");
+                else if ("0".equals(game.machineOptions.get("output_volume"))) game.machineOptions.put("output_volume", "100");
+            });
+            return selected.find(displayed.id);
+        }, saved -> {
+            if (launchAfter) start(saved);
+            else setProgress("游戏配置已保存");
+        });
     }
     void loadFonts(GameLibrary.Game game) {
         GameLibrary selected = games;
@@ -187,14 +223,13 @@ public final class MainActivity extends ComponentActivity {
                 ids.add(font.id);
                 labels.add(font.name + " · " + font.source + (font.error == null ? "" : " · " + font.error));
             }
-            new AlertDialog.Builder(this).setTitle("PC-98 字库 · 下次启动生效")
-                    .setSingleChoiceItems(labels.toArray(new String[0]), Math.max(0, ids.indexOf(game.fontSelection)), (picker, index) -> {
+            labels.add("导入字库…");
+            ui.showChoices("PC-98 字库 · 下次启动生效", labels.toArray(new String[0]), Math.max(0, ids.indexOf(game.fontSelection)), index -> {
+                        if (index == ids.size()) { chooseGameFont(game); return; }
                         if (index > 0 && fonts.get(index - 1).error != null) { error(new IOException(fonts.get(index - 1).error)); return; }
-                        picker.dismiss();
                         perform("正在选择字库…", () -> { selected.updateGame(game.id, current -> current.fontSelection = ids.get(index)); return true; },
                                 ignored -> setProgress("字库已选择，下次启动生效"));
-                    }).setNeutralButton("导入字库…", (picker, which) -> chooseGameFont(game))
-                    .setNegativeButton("关闭", null).show();
+                    });
         });
     }
     private void repairNames(GameLibrary.Game game) {
@@ -218,13 +253,24 @@ public final class MainActivity extends ComponentActivity {
     void chooseGameResources(GameLibrary.Game game) { resourceGameId = game.id; chooseFile(61, true); }
     void addGame() {
         if (busy) return;
-        String[] choices = platform == 98 ? new String[]{"磁盘游戏文件夹", "磁盘游戏 ZIP", "DOS 游戏目录", "DOS 游戏 ZIP"} : new String[]{"游戏文件夹", "游戏 ZIP"};
-        new AlertDialog.Builder(this).setTitle("添加一款游戏").setItems(choices, (dialog, which) -> {
-            if (which == 0 || which == 2) {
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION); startActivityForResult(intent, which == 2 ? 66 : 21);
-            } else chooseFile(which == 3 ? 65 : 20, false);
-        }).setNegativeButton("取消", null).show();
+        cancelImageImport(); ui.openImport();
+    }
+    void chooseImport(int which) {
+        if (busy || which < 0 || which > (platform == 98 ? 3 : 1)) return;
+        cancelImageImport();
+        if (which == 0 || which == 2) {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION); startActivityForResult(intent, which == 2 ? 66 : 21);
+        } else chooseFile(which == 3 ? 65 : 20, false);
+    }
+    void chooseImages() { chooseFile(22, true); }
+    void cancelImageImport() { pendingImages = new ArrayList<>(); }
+    void importImages(String name) {
+        GameLibrary selected = games;
+        List<Uri> images = new ArrayList<>(pendingImages);
+        perform("正在导入磁盘镜像…", () -> selected.importImages(images, name), imported -> {
+            cancelImageImport(); ui.importFinished(); setProgress("已添加到游戏库");
+        });
     }
     private void chooseFile(int request, boolean multiple) {
         if (busy) return;
@@ -235,42 +281,26 @@ public final class MainActivity extends ComponentActivity {
     }
     void manage(GameLibrary.Game game) {
         if (busy) return;
-        String[] actions = platform == 98 ? new String[]{"系统设置", "字库设置 · FREECG98.BMP", "启动环境与盘位", "修复磁盘名称编码", "重命名", "管理磁盘文件", "移除游戏"} :
-                new String[]{"系统设置", "默认盘位", "修复磁盘名称编码", "重命名", "管理磁盘文件", "移除游戏"};
-        new AlertDialog.Builder(this).setTitle(game.name).setItems(actions, (dialog, choice) -> {
-            if (platform == 98 && choice == 1) { fontSettings(game); return; }
-            int action = platform == 98 && choice > 1 ? choice - 1 : choice;
-            if (action == 0) ui.openSettings(game);
-            if (action == 1) ui.openLaunch(game, true);
-            if (action == 2) repairNames(game);
-            if (action == 3) rename(game);
-            if (action == 4) files(game);
-            if (action == 5) remove(game);
-        }).setNegativeButton("关闭", null).show();
+        ui.openManagement(game);
     }
-    private void rename(GameLibrary.Game game) {
-        EditText name = new EditText(this); name.setSingleLine(true); name.setText(game.name); name.selectAll();
-        new AlertDialog.Builder(this).setTitle("游戏名称").setView(name).setPositiveButton("保存", (dialog, which) -> {
-            String value = name.getText().toString().trim();
-            if (value.isEmpty() || value.length() > 80) { error(new IOException("名称需为 1–80 个字符")); return; }
-            perform("正在保存…", () -> { games.updateGame(game.id, current -> current.name = value); return true; }, ignored -> {});
-        }).setNegativeButton("取消", null).show();
+    void gameAction(GameLibrary.Game game, String action) {
+        if (busy) return;
+        switch (action) {
+            case "font": fontSettings(game); break;
+            case "files": files(game); break;
+            case "encoding": repairNames(game); break;
+            case "remove": remove(game); break;
+        }
     }
     private void files(GameLibrary.Game game) {
         String[] labels = game.media.stream().map(disk -> disk.name + (disk.titles.size() > 1 ? "（含 " + disk.titles.size() + " 张盘）" : "") +
                 (disk.file.getName().equals(game.first) ? " · 默认启动盘 " + (game.firstIndex + 1) : "") +
                 (disk.file.getName().equals(game.second) ? " · 默认第二盘 " + (game.secondIndex + 1) : "")).toArray(String[]::new);
-        AlertDialog.Builder picker = new AlertDialog.Builder(this).setTitle("游戏磁盘文件").setItems(labels, (dialog, index) -> {
-            Library.Disk disk = game.media.get(index);
-            new AlertDialog.Builder(this).setTitle(disk.name).setItems(new String[]{"导出磁盘副本", "移除这个文件"}, (actions, choice) -> {
-                if (choice == 0) export(disk);
-                else new AlertDialog.Builder(this).setTitle("移除磁盘副本？").setMessage("此副本中的游戏存档也会删除。")
-                        .setPositiveButton("移除", (confirm, which) -> perform("正在移除文件…", () -> games.removeDisk(game, disk), cleaned -> {}))
-                        .setNegativeButton("取消", null).show();
-            }).setNegativeButton("返回", null).show();
-        }).setNegativeButton("关闭", null);
-        if (platform == 98) picker.setNeutralButton("添加内置磁盘", (dialog, which) -> new AlertDialog.Builder(this).setTitle("添加内置磁盘")
-                .setItems(new String[]{"新建 1.2 MB 存档盘", "DOS 维护工具盘"}, (choice, kind) -> {
+        List<String> choices = new ArrayList<>(Arrays.asList(labels));
+        if (platform == 98) choices.add("添加内置磁盘");
+        ui.showChoices("游戏磁盘文件", choices.toArray(new String[0]), -1, index -> {
+            if (index < game.media.size()) { diskActions(game, game.media.get(index)); return; }
+            ui.showChoices("添加内置磁盘", new String[]{"新建 1.2 MB 存档盘", "DOS 维护工具盘"}, -1, kind -> {
             GameLibrary selected = games;
             perform("正在创建 1.2 MB 存档盘…", () -> {
                 GameLibrary.Game current = selected.find(game.id);
@@ -281,8 +311,17 @@ public final class MainActivity extends ComponentActivity {
                 else selected.createToolDisk(game.id);
                 return selected.find(game.id);
             }, this::files);
-        }).setNegativeButton("取消", null).show());
-        picker.show();
+            });
+        });
+    }
+    void diskActions(GameLibrary.Game game, Library.Disk disk) {
+        if (busy) return;
+        ui.showChoices(disk.name, new String[]{"导出磁盘副本", "移除这个文件"}, -1, choice -> {
+            if (choice == 0) export(disk);
+            else new AlertDialog.Builder(this).setTitle("移除磁盘副本？").setMessage("此副本中的游戏存档也会删除。")
+                    .setPositiveButton("移除", (confirm, which) -> perform("正在移除文件…", () -> games.removeDisk(game, disk), cleaned -> {}))
+                    .setNegativeButton("取消", null).show();
+        });
     }
     private void remove(GameLibrary.Game game) {
         new AlertDialog.Builder(this).setTitle("移除“" + game.name + "”？").setMessage("将删除这款游戏的应用内磁盘和即时档，需要的游戏内存档可先导出磁盘。")
@@ -296,12 +335,28 @@ public final class MainActivity extends ComponentActivity {
     }
     void settings() {
         if (busy) return;
-        String[] choices = platform == 98 ? new String[]{"导入系统 ROM / 字库", "MIDI 音色库", "使用说明", "来源与许可", "手机音频输出", "DOS 系统模板"} : new String[]{"导入系统 ROM / 字库", "MIDI 音色库", "使用说明", "来源与许可", "手机音频输出"};
-        new AlertDialog.Builder(this).setTitle("PC-" + platform + " 设置").setItems(choices, (dialog, choice) -> {
-            if (choice == 0) chooseFile(10, true); if (choice == 1) soundFonts(); if (choice == 2) help(); if (choice == 3) licenses();
-            if (choice == 4) HostAudio.settings(this);
-            if (choice == 5) chooseDosTemplate();
-        }).setNegativeButton("关闭", null).show();
+        ui.openPlatformSettings();
+    }
+    void openPlatformSetting(String key) {
+        if (busy) return;
+        switch (key) {
+            case "rom": chooseFile(10, true); break;
+            case "midi": soundFonts(); break;
+            case "guide": help(); break;
+            case "license": licenses(); break;
+            case "audio": HostAudio.settings(this); break;
+            case "storage": storage(); break;
+            case "dos": chooseDosTemplate(); break;
+        }
+    }
+    private void storage() {
+        perform("正在统计应用文件…", () -> AppStorage.inspect(this), ui::showStorage);
+    }
+    void cleanStorage() {
+        perform("正在清理残留…", () -> AppStorage.clean(this), removed -> {
+            setProgress("已释放 " + android.text.format.Formatter.formatFileSize(this, removed));
+            storage();
+        });
     }
     void chooseDosTemplate() { chooseFile(70, false); }
     String preferredDosTemplate() { return getSharedPreferences("dos", MODE_PRIVATE).getString("template", ""); }
@@ -325,16 +380,16 @@ public final class MainActivity extends ComponentActivity {
         List<String> names = new ArrayList<>();
         for (File file : files) names.add(fonts.name(file) + (file.equals(active) ? " · 当前" : ""));
         names.add("导入 SF2 音色库…");
-        new AlertDialog.Builder(this).setTitle("MIDI 音色库").setItems(names.toArray(new String[0]), (dialog, index) -> {
+        ui.showChoices("MIDI 音色库", names.toArray(new String[0]), files.indexOf(active), index -> {
             if (index == files.size()) { chooseFile(50, false); return; }
             File selected = files.get(index);
-            new AlertDialog.Builder(this).setTitle(fonts.name(selected)).setItems(new String[]{"设为当前音色库", "移除音色库"}, (picker, choice) -> {
+            ui.showChoices(fonts.name(selected), new String[]{"设为当前音色库", "移除音色库"}, -1, choice -> {
                 if (choice == 0) perform("正在选择音色库…", () -> { fonts.select(selected); return true; }, ignored -> setProgress("已选择，下次启动生效"));
                 else new AlertDialog.Builder(this).setTitle("移除此音色库？").setMessage("启用 MIDI 的游戏需选择另一份音色库。")
                         .setPositiveButton("移除", (confirm, which) -> perform("正在移除音色库…", () -> { fonts.remove(selected); return true; }, ignored -> {}))
                         .setNegativeButton("取消", null).show();
-            }).setNegativeButton("返回", null).show();
-        }).setNegativeButton("关闭", null).show();
+            });
+        });
     }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
@@ -342,7 +397,7 @@ public final class MainActivity extends ComponentActivity {
             ui.playerReturned(); refresh();
             if (data != null && data.hasExtra("restoreSlot")) {
                 String id = data.getStringExtra("gameId"); int slot = data.getIntExtra("restoreSlot", -1);
-                if (slot >= 0 && slot <= StateSlots.COUNT) {
+                if (slot >= 0 && slot <= StateSlots.QUICK) {
                     Handler handler = new Handler(Looper.getMainLooper());
                     long deadline = android.os.SystemClock.uptimeMillis() + 5000;
                     handler.post(new Runnable() {
@@ -367,14 +422,22 @@ public final class MainActivity extends ComponentActivity {
         }
         if (result != RESULT_OK || data == null) return;
         GameLibrary selected = games;
-        if (request == 20 || request == 21) {
+        if (request == 22) {
+            List<Uri> locations = uris(data);
+            perform("正在读取镜像名称…", () -> {
+                if (locations.size() > 512) throw new IOException("请选择单款游戏的磁盘镜像");
+                List<String> names = new ArrayList<>();
+                for (Uri uri : locations) names.add(selected.legacy.name(uri));
+                return names;
+            }, names -> { pendingImages = locations; ui.imagesSelected(names); });
+        } else if (request == 20 || request == 21) {
             List<Uri> locations = uris(data);
             if (locations.isEmpty()) return;
             perform("正在添加游戏…", () -> {
                 GameLibrary.Game last = null;
                 for (Uri uri : locations) last = request == 20 ? selected.importZip(uri) : selected.importFolder(uri);
                 return last;
-            }, game -> setProgress("已添加到游戏库"));
+            }, game -> { ui.importFinished(); setProgress("已添加到游戏库"); });
         } else if (request == 10) {
             List<Uri> locations = uris(data);
             perform("正在导入系统资源…", () -> { int count = 0; for (Uri uri : locations) count += selected.legacy.importRoms(uri); return count; },
@@ -429,25 +492,22 @@ public final class MainActivity extends ComponentActivity {
         return values;
     }
     private void error(Exception exception) {
-        if (!isFinishing()) new AlertDialog.Builder(this).setTitle("操作未完成").setMessage(exception.getMessage()).setPositiveButton("知道了", null).show();
+        if (!isFinishing()) ui.showError(exception.getMessage());
     }
     private void help() {
-        new AlertDialog.Builder(this).setTitle("开始游玩").setMessage("选择 PC-88 或 PC-98 后添加游戏文件夹或 ZIP。点击卡片启动，游戏管理中可调整启动环境与盘位。PC-98 明确缺少 DOS 的游戏会自动补齐系统盘，多个入口可手选后准备。系统设置按游戏保存，下次启动生效。\n\n游玩时使用菜单换盘、操作键盘或虚拟鼠标，也可保存六个手动即时档。换盘面板可新建存档盘，磁盘管理可添加 DOS 维护工具盘。游戏内存档可通过导出磁盘副本保管。")
-                .setPositiveButton("知道了", null).show();
+        ui.showDocument("开始游玩", "在顶部切换 PC-88 或 PC-98，通过“添加游戏”导入镜像、游戏文件夹或 ZIP。多盘游戏可一次选择多张镜像。PC-98 也支持 DOS 游戏目录与 ZIP。\n\n最近启动卡片可继续上次会话。列表播放按钮启动游戏，已有会话时可选择继续或重新启动。点击游戏名称或省略号进入游戏管理，调整名称、机器、音量、启动环境与盘位，或导出磁盘。\n\n展开游玩工具球可使用 Esc、快速存档和快速读档。菜单提供六个手动槽，退出和切到后台时自动保存独立会话槽。滑动先输入一次方向，保持触摸 420 毫秒后持续按住，松手释放。\n\n游戏库显示累计游玩时间，暂停、菜单和后台时间排除。设置中的“数据占用与清理”可查看空间明细并清理导入残留。");
     }
     private void licenses() {
         try {
             String[] list = getAssets().list("licenses"); if (list == null) return;
-            new AlertDialog.Builder(this).setTitle("来源与许可").setItems(list, (dialog, index) -> {
+            ui.showChoices("来源与许可", list, -1, index -> perform("正在读取许可…", () -> {
                 try (InputStream input = getAssets().open("licenses/" + list[index]); ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
                     Library.copy(input, bytes, 1024 * 1024);
                     String license = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
                     if (license.indexOf('\ufffd') >= 0) license = new String(bytes.toByteArray(), java.nio.charset.Charset.forName("windows-31j"));
-                    TextView text = Ui.text(this, license, 12, Color.WHITE); text.setTextIsSelectable(true);
-                    ScrollView scroll = new ScrollView(this); scroll.addView(text);
-                    new AlertDialog.Builder(this).setTitle(list[index]).setView(scroll).setPositiveButton("关闭", null).show();
-                } catch (Exception exception) { error(exception); }
-            }).setNegativeButton("关闭", null).show();
+                    return license;
+                }
+            }, license -> ui.showDocument(list[index], license)));
         } catch (Exception exception) { error(exception); }
     }
     @Override protected void onDestroy() { io.shutdown(); super.onDestroy(); }

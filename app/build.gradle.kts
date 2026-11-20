@@ -9,6 +9,11 @@ val releaseVersion = Properties().apply {
     rootProject.file("version.properties").inputStream().use { load(it) }
 }
 val nativeOutput = layout.buildDirectory.dir("generated/jniLibs")
+val releaseNotesAssets = layout.buildDirectory.dir("generated/releaseNotes")
+val prepareReleaseNotes by tasks.registering(Copy::class) {
+    from(rootProject.file("CHANGELOG.md")) { rename { "changelog.md" } }
+    into(releaseNotesAssets.map { it.dir("updates") })
+}
 val buildNative by tasks.registering(Exec::class) {
     workingDir(rootProject.projectDir)
     val sdk = rootProject.file(providers.gradleProperty("nec.sdk").getOrElse(".cache/android-sdk"))
@@ -61,13 +66,14 @@ android {
         getByName("debug") { signingConfig = signingConfigs.getByName("existing") }
     }
     sourceSets.getByName("main").jniLibs.srcDir(nativeOutput.get().asFile)
+    sourceSets.getByName("main").assets.srcDir(releaseNotesAssets.get().asFile)
     providers.gradleProperty("nec.dosAssets").orNull?.let {
         sourceSets.getByName("main").assets.srcDir(rootProject.file(it))
     }
     packaging { jniLibs.useLegacyPackaging = true }
 }
 
-tasks.named("preBuild") { dependsOn(buildNative) }
+tasks.named("preBuild") { dependsOn(buildNative, prepareReleaseNotes) }
 
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.08.00"))

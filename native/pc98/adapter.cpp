@@ -214,6 +214,10 @@ static bool openCore(const char* directory, const char* disk, const char* second
     options["np2kai_drive"] = "FDD1";
     options["np2kai_inputmouse"] = "ON";
     options["np2kai_keyboard"] = "Ja";
+    // BIOS-driven menus need keyboard repeat as well as a held matrix key.
+    options["np2kai_keyrepeat"] = "ON";
+    options["np2kai_keyrepeat_delay"] = "250ms";
+    options["np2kai_keyrepeat_interval"] = "100ms";
     options["np2kai_uselasthddmount"] = "OFF";
     options["np2kai_clk_mult"] = mode == 1 ? "8" : mode == 2 ? "16" : "4";
     options["np2kai_SNDboard"] = "PC9801-86";
@@ -339,7 +343,12 @@ static unsigned mouseReads() { return readMouseCounter ? readMouseCounter() : 0;
 static const char* diskPath(int drive) { return floppyPath && drive >= 0 && drive < 2 ? floppyPath(drive) : ""; }
 static bool saveState(const char* path) { return saveMachine && saveMachine(path); }
 static bool checkState(const char* path) { return checkMachine && checkMachine(path); }
-static bool loadState(const char* path) { if (!loadMachine || !loadMachine(path)) return false; keys.fill(false); mouseX=mouseY=polledX=polledY=0; mouseButtons=0; return true; }
+static bool loadState(const char* path) {
+    if (!loadMachine || !loadMachine(path)) return false;
+    keys.fill(false); mouseX=mouseY=polledX=polledY=0; mouseButtons=0;
+    variablesChanged = true;
+    return true;
+}
 extern "C" const NecCore* nec_core() {
     static const NecCore api{"NP2kai / PC-98", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, diskPath, mouseReads};
     return &api;

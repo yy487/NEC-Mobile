@@ -9,11 +9,12 @@ import java.util.*;
 final class StateSlots {
     static final int COUNT=6;
     static final int AUTO=0;
+    static final int QUICK=COUNT+1;
     private final File root;
-    StateSlots(File gameDirectory) { root=new File(gameDirectory,"states"); root.mkdirs(); }
+    StateSlots(File gameDirectory) { root=new File(gameDirectory,"states"); }
     private AtomicFile pointer(int slot) {
-        if (slot<0 || slot>COUNT) throw new IllegalArgumentException("无效存档槽");
-        return new AtomicFile(new File(root,slot == AUTO ? "auto.txt" : "slot-"+slot+".txt"));
+        if (slot<0 || slot>QUICK) throw new IllegalArgumentException("无效存档槽");
+        return new AtomicFile(new File(root,slot == AUTO ? "auto.txt" : slot == QUICK ? "quick.txt" : "slot-"+slot+".txt"));
     }
     boolean hasAuto() { return new File(root,"auto.txt").isFile() || new File(root,"auto.txt.bak").isFile(); }
     private static long number(DataInputStream input) throws IOException { return Integer.toUnsignedLong(Integer.reverseBytes(input.readInt())); }
@@ -81,7 +82,7 @@ final class StateSlots {
     }
     boolean references(GameLibrary.Game game, int platform, File file) throws Exception {
         String name = file.getCanonicalPath();
-        for (int slot = 0; slot <= COUNT; ++slot) {
+        for (int slot = 0; slot <= QUICK; ++slot) {
             if (folder(slot) == null) continue;
             LaunchMedia saved = snapshot(game, platform, slot).media;
             for (LaunchMedia.Ref ref : new LaunchMedia.Ref[]{saved.floppyA, saved.floppyB, saved.hardDisk})
@@ -100,13 +101,17 @@ final class StateSlots {
         return folder;
     }
     String label(int slot) {
+        String title = title(slot);
         try {
-            if (folder(slot)==null) return "槽 "+slot+" · 空";
+            if (folder(slot)==null) return title+" · 空";
             String[] fields=new String(pointer(slot).readFully(),StandardCharsets.UTF_8).split("\n");
-            return "槽 "+slot+" · "+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(Long.parseLong(fields[1])));
-        } catch (Exception error) { return "槽 "+slot+" · 无法读取"; }
+            return title+" · "+DateFormat.getDateTimeInstance(DateFormat.SHORT,DateFormat.SHORT).format(new Date(Long.parseLong(fields[1])));
+        } catch (Exception error) { return title+" · 无法读取"; }
     }
+    static String title(int slot) { return slot == AUTO ? "上次会话" : slot == QUICK ? "快速存档" : "槽 " + slot; }
     void save(int slot) throws Exception {
+        pointer(slot);
+        if (!root.isDirectory() && !root.mkdirs()) throw new IOException("无法创建存档目录");
         File old;
         try { old=folder(slot); } catch (IOException damaged) { old=null; }
         File fresh=new File(root,UUID.randomUUID().toString());
@@ -119,7 +124,8 @@ final class StateSlots {
                 out.write((fresh.getName()+"\n"+System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8)); storage.finishWrite(out);
             } catch (Exception error) { storage.failWrite(out); throw error; }
         } catch (Exception error) { clean(fresh); throw error; }
-        if (old!=null) clean(old);
+        if (old!=null) try { clean(old); } catch (IOException ignored) { }
+        prune();
     }
     void load(int slot) throws Exception {
         File selected=folder(slot); if (selected==null) throw new IOException("此槽没有存档");
@@ -131,6 +137,23 @@ final class StateSlots {
         File folder;
         try { folder=folder(slot); } catch (IOException damaged) { folder=null; }
         pointer(slot).delete(); if (folder!=null) clean(folder);
+        prune();
+    }
+    List<File> unused() {
+        Set<String> retained = new HashSet<>();
+        try {
+            for (int slot = AUTO; slot <= QUICK; slot++) {
+                File saved = folder(slot);
+                if (saved != null) retained.add(saved.getName());
+            }
+        } catch (IOException damaged) { return Collections.emptyList(); }
+        File[] folders = root.listFiles(file -> file.isDirectory() && file.getName().matches("[0-9a-f-]{36}"));
+        List<File> result = new ArrayList<>();
+        if (folders != null) for (File folder : folders) if (!retained.contains(folder.getName())) result.add(folder);
+        return result;
+    }
+    void prune() {
+        for (File folder : unused()) try { clean(folder); } catch (IOException ignored) { }
     }
     private void clean(File folder) throws IOException {
         if (!folder.getCanonicalFile().getParentFile().equals(root.getCanonicalFile()) || !folder.getName().matches("[0-9a-f-]{36}")) throw new IOException("存档清理范围无效");

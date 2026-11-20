@@ -10,16 +10,15 @@ import android.view.DisplayCutout;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.Gravity;
 import android.view.WindowInsets;
 import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.GridLayout;
-import android.widget.ScrollView;
 import java.util.List;
 
 final class FloatingTools extends FrameLayout {
     private final Button ball;
-    private final ScrollView panel;
+    private final FrameLayout panel;
     private final SharedPreferences preferences;
     private final Runnable onCollapse;
     private final Rect safe = new Rect(), movement = new Rect();
@@ -36,24 +35,29 @@ final class FloatingTools extends FrameLayout {
         size = Ui.dp(activity, 48);
         margin = Ui.dp(activity, 8);
         slop = ViewConfiguration.get(activity).getScaledTouchSlop();
-        GridLayout grid = new GridLayout(activity);
-        grid.setColumnCount(2);
-        int padding = Ui.dp(activity, 4);
-        grid.setPadding(padding, padding, padding, padding);
-        for (int i = 0; i < shortcuts.size(); i++) {
-            int span = i == shortcuts.size() - 1 && i % 2 == 0 ? 2 : 1;
-            GridLayout.LayoutParams params = new GridLayout.LayoutParams(
-                    GridLayout.spec(i / 2), GridLayout.spec(i % 2, span, GridLayout.FILL, 1f));
-            params.width = 0;
-            params.height = Ui.dp(activity, 44);
-            int gap = Ui.dp(activity, 2);
-            params.setMargins(gap, gap, gap, gap);
-            shortcuts.get(i).setPadding(0, 0, 0, 0);
-            grid.addView(shortcuts.get(i), params);
+        panel = new FrameLayout(activity) {
+            @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+                super.onLayout(changed, left, top, right, bottom);
+                float radius = (getWidth() - Ui.dp(activity, 56)) / 2f - Ui.dp(activity, 8);
+                for (int i = 0; i < getChildCount(); i++) {
+                    double angle = Math.toRadians(-90 + i * 360.0 / getChildCount());
+                    getChildAt(i).setTranslationX((float)Math.cos(angle) * radius);
+                    getChildAt(i).setTranslationY((float)Math.sin(angle) * radius);
+                }
+            }
+        };
+        for (View shortcut : shortcuts) {
+            shortcut.setPadding(0, 0, 0, 0);
+            shortcut.setBackground(Ui.background(0xf02b3748, Ui.dp(activity, 28)));
+            shortcut.setBackgroundTintList(null);
+            if (shortcut instanceof Button) {
+                Button button = (Button)shortcut;
+                button.setTextSize(12); button.setMinHeight(0); button.setMinimumHeight(0);
+                button.setStateListAnimator(null);
+            }
+            panel.addView(shortcut, new FrameLayout.LayoutParams(Ui.dp(activity, 56), Ui.dp(activity, 56), Gravity.CENTER));
         }
-        panel = new ScrollView(activity);
-        panel.addView(grid);
-        panel.setBackground(Ui.background(0xf01b2330, Ui.dp(activity, 12)));
+        panel.setBackground(Ui.background(0xe010151f, Ui.dp(activity, 160)));
         panel.setClipToOutline(true);
         panel.setVisibility(GONE);
         addView(panel);
@@ -84,6 +88,7 @@ final class FloatingTools extends FrameLayout {
         panel.setVisibility(show ? VISIBLE : GONE);
         ball.setText(show ? "×" : "≡");
         ball.setAlpha(show ? 0.92f : 0.58f);
+        ball.setBackground(Ui.background(0xf0232c3a, Ui.dp((Activity)getContext(), 34)));
         ball.setContentDescription(show ? "收起工具栏，可拖动位置" : "展开工具栏，可拖动位置");
         if (show) {
             panel.setAlpha(0);
@@ -107,7 +112,7 @@ final class FloatingTools extends FrameLayout {
         if (action == MotionEvent.ACTION_DOWN) {
             pointer = event.getPointerId(0);
             downRawX = event.getRawX(); downRawY = event.getRawY();
-            downX = x; downY = y;
+            downX = ball.getTranslationX(); downY = ball.getTranslationY();
             dragging = false;
             ball.setPressed(true);
         } else if (action == MotionEvent.ACTION_CANCEL ||
@@ -168,10 +173,11 @@ final class FloatingTools extends FrameLayout {
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
         int width = MeasureSpec.getSize(widthSpec), height = MeasureSpec.getSize(heightSpec);
         setMeasuredDimension(width, height);
-        ball.measure(MeasureSpec.makeMeasureSpec(size, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(size, MeasureSpec.EXACTLY));
-        int panelWidth = Math.max(1, Math.min(Ui.dp((Activity)getContext(), 176), width - safe.left - safe.right - margin * 2));
-        int panelHeight = Math.max(1, height - safe.top - safe.bottom - size - margin * 3);
-        panel.measure(MeasureSpec.makeMeasureSpec(panelWidth, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(panelHeight, MeasureSpec.AT_MOST));
+        int centerSize = expanded ? Ui.dp((Activity)getContext(), 68) : size;
+        ball.measure(MeasureSpec.makeMeasureSpec(centerSize, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(centerSize, MeasureSpec.EXACTLY));
+        int diameter = Math.max(1, Math.min(Ui.dp((Activity)getContext(), 272),
+                Math.min(width - safe.left - safe.right, height - safe.top - safe.bottom) - margin * 2));
+        panel.measure(MeasureSpec.makeMeasureSpec(diameter, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(diameter, MeasureSpec.EXACTLY));
     }
 
     @Override protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
@@ -179,15 +185,17 @@ final class FloatingTools extends FrameLayout {
         movement.set(minX, minY, Math.max(minX, getWidth() - safe.right - margin - size),
                 Math.max(minY, getHeight() - safe.bottom - margin - size));
         if (!dragging) { x = leftEdge ? movement.left : movement.right; y = movement.top + vertical * movement.height(); }
-        int panelWidth = panel.getMeasuredWidth(), panelHeight = panel.getMeasuredHeight();
-        boolean above = y - movement.top >= movement.bottom - y;
-        if (expanded) y = above ? Math.max(y, movement.top + panelHeight + margin) : Math.min(y, movement.bottom - panelHeight - margin);
-        ball.layout(0, 0, size, size);
-        ball.setTranslationX(x); ball.setTranslationY(y);
-        int panelX = leftEdge ? movement.left : movement.right + size - panelWidth;
-        int panelY = Math.round(above ? y - margin - panelHeight : y + size + margin);
-        panel.layout(panelX, panelY, panelX + panelWidth, panelY + panelHeight);
-        panel.setPivotX(leftEdge ? size / 2f : panelWidth - size / 2f);
-        panel.setPivotY(above ? panelHeight : 0);
+        int diameter = panel.getMeasuredWidth();
+        float centerX = x + size / 2f, centerY = y + size / 2f;
+        if (expanded) {
+            centerX = Math.max(minX + diameter / 2f, Math.min(getWidth() - safe.right - margin - diameter / 2f, centerX));
+            centerY = Math.max(minY + diameter / 2f, Math.min(getHeight() - safe.bottom - margin - diameter / 2f, centerY));
+        }
+        int centerSize = ball.getMeasuredWidth();
+        ball.layout(0, 0, centerSize, centerSize);
+        ball.setTranslationX(centerX - centerSize / 2f); ball.setTranslationY(centerY - centerSize / 2f);
+        int panelX = Math.round(centerX - diameter / 2f), panelY = Math.round(centerY - diameter / 2f);
+        panel.layout(panelX, panelY, panelX + diameter, panelY + diameter);
+        panel.setPivotX(diameter / 2f); panel.setPivotY(diameter / 2f);
     }
 }

@@ -16,6 +16,17 @@ import java.util.concurrent.Executors;
 public final class PlayerActivity extends Activity implements SurfaceHolder.Callback, AudioManager.OnAudioFocusChangeListener {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService stateIo = Executors.newSingleThreadExecutor();
+    private final PlayTime playTime = new PlayTime();
+    private final String playSession = UUID.randomUUID().toString();
+    private long previousPlayTime, sessionRevision;
+    private volatile long autoSavedRevision = -1;
+    private final Runnable timeCheckpoint = new Runnable() {
+        @Override public void run() {
+            if (closing || !resumed) return;
+            checkpointPlayTime();
+            handler.postDelayed(this, 60000);
+        }
+    };
     private final List<Button> modifiers = new ArrayList<>();
     private SurfaceView surface;
     private LinearLayout keyboard;
@@ -26,6 +37,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private final Map<Button, Integer> toolKeys = new HashMap<>();
     private MousePad mousePad;
     private SwipeKeys swipeKeys;
+    private final Runnable holdSwipe = () -> { if (touchKeysAllowed()) swipeKeys.hold(SystemClock.uptimeMillis()); };
     private final List<Button> mouseKeys = new ArrayList<>();
     private final Runnable holdMouse = () -> { if (mouseAllowed()) mousePad.longPress(); };
     private boolean mouseEnabled;
@@ -51,7 +63,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private boolean focusGranted, appliedPause = true;
     private boolean stateBusy;
     private boolean startupReported, startupFailed;
-    private boolean resumeLoading, autoEnabled, autoSaving, autoPending, everRunning;
+    private boolean resumeLoading, autoSaving, autoPending, everRunning;
     private String displayAspect;
     private int lastGeometry;
     private final Runnable rebuildAudio = () -> { if (nativeStarted && !closing) Native.audioChanged(); };
@@ -113,7 +125,6 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         String orientation = getIntent().getStringExtra("displayOrientation");
         orientationMode = "LANDSCAPE".equals(orientation) ? 1 : "PORTRAIT".equals(orientation) ? 2 : 0;
         displayAspect = getIntent().getStringExtra("displayAspect");
-        autoEnabled = getIntent().getBooleanExtra("resumeEnabled", false);
         applyOrientation();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
@@ -137,6 +148,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         try {
             String id = getIntent().getStringExtra("gameId");
             GameLibrary.Game game = id == null ? null : new GameLibrary(this, platform).find(id);
+            previousPlayTime = game == null ? 0 : game.playTimeMillis;
             gameDisks = game == null ? new Library(this, platform).list() : game.media;
             for (Library.Disk disk : gameDisks) mediaNames.put(disk.file.getAbsolutePath(), disk.name);
         } catch (Exception exception) { Toast.makeText(this, exception.getMessage(), Toast.LENGTH_LONG).show(); }
@@ -174,12 +186,15 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         surface.setFocusable(true); surface.setFocusableInTouchMode(true);
         screen.addView(surface, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         root.addView(screen, new FrameLayout.LayoutParams(-1, -1));
-        swipeKeys = new SwipeKeys(24, code -> { Native.key(code, true); Native.key(code, false); });
+        swipeKeys = new SwipeKeys(24, Native::key);
         swipeKeys.keypad(keypadDirections);
         mousePad = new MousePad(ViewConfiguration.get(this).getScaledTouchSlop(), new MousePad.Sink() {
             public void move(int x, int y) {
                 if (mouseAllowed()) Native.mouse(x, y, mouseButtons | gestureButtons);
-                else if (touchKeysAllowed()) swipeKeys.move(x, y);
+                else if (touchKeysAllowed() && swipeKeys.move(x, y, SystemClock.uptimeMillis())) {
+                    handler.removeCallbacks(holdSwipe);
+                    handler.postDelayed(holdSwipe, SwipeKeys.HOLD_DELAY_MS);
+                }
             }
             public void buttons(int mask) { gestureButtons = mask; if (mouseAllowed()) Native.mouse(0, 0, mouseButtons | gestureButtons); }
             public void click(int mask) {
@@ -204,9 +219,12 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         controls.setVisibility(View.GONE); root.addView(controls);
         List<View> shortcuts = new ArrayList<>();
         Button enter = key("Enter", 13, false); toolKeys.put(enter, 13); shortcuts.add(enter);
-        if (platform == 88) {
-            Button space = key("空格", 32, false); toolKeys.put(space, 32); shortcuts.add(space);
-        }
+        Button escape = key("Esc", 27, false); toolKeys.put(escape, 27); shortcuts.add(escape);
+        Button space = key("空格", 32, false); toolKeys.put(space, 32); shortcuts.add(space);
+        Button quickSave = Ui.button(this, "快存", () -> stateTask(StateSlots.QUICK, false));
+        quickSave.setContentDescription("快速存档，覆盖独立快速槽"); shortcuts.add(quickSave);
+        Button quickLoad = Ui.button(this, "快读", () -> stateTask(StateSlots.QUICK, true));
+        quickLoad.setContentDescription("快速读档，读取独立快速槽"); shortcuts.add(quickLoad);
         shortcuts.add(Ui.button(this, "键盘", () -> { floatingTools.collapse(); toggleKeyboard(); }));
         inputSwitch = Ui.button(this, "按键", () -> requestInputMode(mouseEnabled ? INPUT_KEYS : INPUT_MOUSE));
         inputSwitch.setTextSize(12);
@@ -341,6 +359,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             if (mouseEnabled) handler.postDelayed(holdMouse, 350);
         } else if (action == MotionEvent.ACTION_POINTER_DOWN) {
             swipeKeys.reset();
+            handler.removeCallbacks(holdSwipe);
             handler.removeCallbacks(holdMouse);
             mousePad.another(event.getPointerId(pointer), event.getX(pointer), event.getY(pointer));
         } else if (action == MotionEvent.ACTION_MOVE) {
@@ -350,7 +369,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) {
             handler.removeCallbacks(holdMouse);
             mousePad.up(event.getPointerId(pointer), event.getX(pointer), event.getY(pointer), event.getEventTime(), action == MotionEvent.ACTION_UP);
-            if (action == MotionEvent.ACTION_UP) swipeKeys.reset();
+            if (action == MotionEvent.ACTION_UP) { handler.removeCallbacks(holdSwipe); swipeKeys.reset(); }
             if (action == MotionEvent.ACTION_UP) view.performClick();
             touchPointers = action == MotionEvent.ACTION_UP ? 0 : event.getPointerCount() - 1;
             applyPendingInput(); refreshInputButton();
@@ -359,6 +378,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void cancelMouse() {
         handler.removeCallbacks(holdMouse);
+        handler.removeCallbacks(holdSwipe);
         if (mousePad != null) mousePad.cancel();
         if (swipeKeys != null) swipeKeys.reset();
         mouseButtons = gestureButtons = 0;
@@ -386,7 +406,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                 mouseSpeed = speed; getSharedPreferences("player", MODE_PRIVATE).edit().putInt("mouseSpeed", speed).apply(); picker.dismiss();
             }).setNegativeButton("返回", null).show();
             else if (choice == 6) inputPresets();
-            else dialog().setTitle("触屏操作").setMessage("自动配置优先使用已套用的操作预设，其次沿用上次操作方式，首次使用滑动按键。检测到完整鼠标通信时，快捷按钮提供试用鼠标建议，点击后按游戏记住选择。标题匹配的预设可在操作预设中确认套用。\n\n滑动按键\n每次上、下、左、右滑动触发一个对应方向。单指轻触发送所选确认键，双指轻触发送另一确认键。\n\n虚拟鼠标\n滑动移动光标，轻触左击，双指右击，长按拖动。左右键按钮可按住配合滑动。\n\n点击运行界面的按键／鼠标按钮可切换，长按打开操作设置。切换在当前触摸结束后生效。")
+            else dialog().setTitle("触屏操作").setMessage("自动配置优先使用已套用的操作预设，其次沿用上次操作方式，首次使用滑动按键。检测到完整鼠标通信时，快捷按钮提供试用鼠标建议，点击后按游戏记住选择。标题匹配的预设可在操作预设中确认套用。\n\n滑动按键\n滑动立即输入一次方向，保持触摸 420 毫秒后持续按住该方向，松手立即释放。向另一方向滑动可转向。单指轻触发送所选确认键，双指轻触发送另一确认键。\n\n虚拟鼠标\n滑动移动光标，轻触左击，双指右击，长按拖动。左右键按钮可按住配合滑动。\n\n点击运行界面的按键／鼠标按钮可切换，长按打开操作设置。切换在当前触摸结束后生效。")
                     .setPositiveButton("知道了", null).show();
         }).setNegativeButton("返回游戏", null).show();
     }
@@ -456,12 +476,25 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private void applyPause() {
         cancelMouse();
         if (floatingTools != null) floatingTools.cancelInteraction();
-        if (!nativeStarted || closing) return;
+        if (!nativeStarted || closing) { playTime.running(false, SystemClock.elapsedRealtime()); return; }
         boolean shouldPause = userPaused || !resumed || !focusGranted || openDialogs > 0 || stateBusy || autoSaving || !startupReported || startupFailed;
-        if (shouldPause != appliedPause) { Native.pause(shouldPause); appliedPause = shouldPause; }
+        if (shouldPause != appliedPause) {
+            Native.pause(shouldPause); appliedPause = shouldPause;
+            if (!shouldPause) sessionRevision++;
+        }
+        playTime.running(!shouldPause, SystemClock.elapsedRealtime());
         if (shouldPause) { touchedKeys.clear(); applyPendingInput(); refreshInputButton(); }
         if (!shouldPause) everRunning = true;
         for (Button modifier : modifiers) { modifier.setSelected(false); modifier.setTextColor(Color.WHITE); }
+    }
+    private void checkpointPlayTime() {
+        long elapsed = playTime.elapsed(SystemClock.elapsedRealtime());
+        String id = getIntent().getStringExtra("gameId");
+        if (elapsed <= 0 || id == null) return;
+        stateIo.execute(() -> {
+            try { new GameLibrary(this, platform).recordPlayTime(id, playSession, elapsed); }
+            catch (Exception error) { android.util.Log.w("NECMobile", "Play time could not be saved", error); }
+        });
     }
     private AlertDialog.Builder dialog() {
         return new AlertDialog.Builder(this) {
@@ -476,7 +509,8 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         };
     }
     private void menu() {
-        dialog().setTitle(gameName).setItems(new String[]{"返回游戏", "即时存档 / 读档", "更换 / 取出磁盘", userPaused || !focusGranted ? "继续运行" : "暂停", "屏幕方向", "操作方式 / 鼠标", "本游戏音源设置", "更多设置", "退出游戏"}, (dialog, index) -> {
+        long elapsed = playTime.elapsed(SystemClock.elapsedRealtime());
+        dialog().setTitle(gameName + "\n本次 " + PlayTime.format(elapsed) + " · 累计 " + PlayTime.format(previousPlayTime + elapsed)).setItems(new String[]{"返回游戏", "即时存档 / 读档", "更换 / 取出磁盘", userPaused || !focusGranted ? "继续运行" : "暂停", "屏幕方向", "操作方式 / 鼠标", "本游戏音源设置", "更多设置", "退出游戏"}, (dialog, index) -> {
             if (index == 1) states();
             if (index == 2) disks();
             if (index == 3) { userPaused = !(userPaused || !focusGranted); if (!userPaused && !focusGranted) requestFocus(); applyPause(); }
@@ -498,13 +532,14 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                         else if (which == 4) aspectSettings();
                         else if (which == 5) dialog().setTitle("实际音频输出").setMessage(HostAudio.route(this, Native.audioDevice()) + "\n\n" + Native.audioInfo()).setPositiveButton("关闭", null).show();
                         else dialog().setTitle("复位机器？").setMessage("尚未在游戏内保存的进度会丢失。")
-                                .setPositiveButton("复位", (a, b) -> Native.reset()).setNegativeButton("取消", null).show();
+                                .setPositiveButton("复位", (a, b) -> { sessionRevision++; Native.reset(); }).setNegativeButton("取消", null).show();
                     }).setNegativeButton("关闭", null).show();
             if (index == 8) confirmExit();
         }).show();
     }
     private StateSlots stateSlots() { return new StateSlots(new java.io.File(getIntent().getStringExtra("directory"))); }
     private void states() {
+        if (stateBusy || autoSaving) return;
         StateSlots slots=stateSlots();
         java.util.function.IntConsumer choose=slot -> {
             dialog().setTitle(slots.label(slot)).setItems(new String[]{"保存当前进度","读取此槽","删除此槽"},(actions,choice)-> {
@@ -512,14 +547,14 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                     boolean occupied=true;
                     try { occupied=slots.folder(slot)!=null; } catch (Exception ignored) { }
                     if (!occupied) stateTask(slot,false);
-                    else dialog().setTitle("覆盖槽 "+slot+"？").setMessage("将用当前进度替换这个槽的即时档。")
+                    else dialog().setTitle("覆盖"+StateSlots.title(slot)+"？").setMessage("将用当前进度替换这个槽的即时档。")
                             .setPositiveButton("保存",(a,b)->stateTask(slot,false)).setNegativeButton("取消",null).show();
                 } else if (choice==1) {
                     try { if (slots.folder(slot)==null) { Toast.makeText(this,"此槽没有存档",Toast.LENGTH_SHORT).show(); return; } }
                     catch (Exception error) { dialog().setTitle("无法读档").setMessage(error.getMessage()).setPositiveButton("知道了",null).show(); return; }
-                    dialog().setTitle("读取槽 "+slot+"？").setMessage("将恢复机器状态及当时的装盘组合，当前未保存的进度会被替换。磁盘里的游戏内存档不会回退。")
+                    dialog().setTitle("读取"+StateSlots.title(slot)+"？").setMessage("将恢复机器状态及当时的装盘组合，当前未保存的进度会被替换。磁盘里的游戏内存档不会回退。")
                             .setPositiveButton("读取",(a,b)->stateTask(slot,true)).setNegativeButton("取消",null).show();
-                } else dialog().setTitle("删除槽 "+slot+"？").setMessage("只删除此即时档，游戏磁盘及游戏内存档保留。")
+                } else dialog().setTitle("删除"+StateSlots.title(slot)+"？").setMessage("将删除所选即时档。")
                         .setPositiveButton("删除",(a,b)-> {
                             try { slots.remove(slot); } catch (Exception error) { Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show(); }
                         }).setNegativeButton("取消",null).show();
@@ -527,23 +562,25 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         };
         LinearLayout grid=Ui.column(this); grid.setPadding(Ui.dp(this,16),0,Ui.dp(this,16),0);
         AlertDialog[] picker={null};
-        for (int row=0;row<3;++row) {
+        for (int row=0;row<4;++row) {
             LinearLayout line=Ui.row(this);
             for (int column=0;column<2;++column) {
-                int slot=row*2+column+1; String label=slots.label(slot);
+                int slot=row<3 ? row*2+column+1 : column==0 ? StateSlots.QUICK : StateSlots.AUTO;
+                String label=slots.label(slot);
                 Button button=Ui.button(this,label.replace(" · ","\n"),()-> { choose.accept(slot); picker[0].dismiss(); });
                 button.setContentDescription(label);
                 line.addView(button,new LinearLayout.LayoutParams(0,Ui.dp(this,60),1));
             }
             grid.addView(line);
         }
-        picker[0]=dialog().setTitle("即时存档 / 读档").setView(grid).setNeutralButton("说明",(a,b)->dialog().setTitle("手动即时存档").setMessage("每款游戏有 6 个手动槽，另有一个独立的自动会话槽。可在系统设置中启用自动保存，从卡片继续会话。\n\n即时档恢复机器状态及装盘组合，磁盘里的写入不会回退。覆盖时旧槽保留到保存成功，读档失败时尝试恢复读档前的进度。\n\n机器或硬盘环境不同时，会按存档配置重新启动游玩进程。卸载或移除游戏会删除这些槽。")
+        ScrollView scroll = new ScrollView(this); scroll.addView(grid);
+        picker[0]=dialog().setTitle("即时存档 / 读档").setView(scroll).setNeutralButton("说明",(a,b)->dialog().setTitle("即时存档").setMessage("每款游戏有 6 个手动槽、1 个独立快速槽和 1 个自动会话槽。工具球中的快存、快读按键直接操作快速槽。退出和切到后台时自动保存会话，下次启动可选择继续。\n\n即时档恢复机器状态及装盘组合，磁盘里的写入不会回退。覆盖时旧槽保留到保存成功，读档失败时尝试恢复读档前的进度。\n\n机器或硬盘环境不同时，会按存档配置重新启动游玩进程。卸载或移除游戏会删除这些槽。")
                 .setPositiveButton("知道了",null).show()).setNegativeButton("返回游戏",null).show();
     }
     private void stateTask(int slot,boolean load) {
-        if (stateBusy || closing) return;
+        if (stateBusy || autoSaving || closing || !startupReported || startupFailed) return;
         stateBusy=true; applyPause();
-        AlertDialog progress=dialog().setTitle(load ? "正在读档…" : "正在保存…").setMessage("槽 "+slot).setCancelable(false).show();
+        AlertDialog progress=dialog().setTitle(load ? "正在读档…" : "正在保存…").setMessage(StateSlots.title(slot)).setCancelable(false).show();
         stateIo.execute(()-> {
             String error=null;
             boolean restart = false;
@@ -559,7 +596,10 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                     progress.dismiss(); restartForState(slot); return;
                 }
                 if (result!=null) dialog().setTitle(load ? "读档未完成" : "保存未完成").setMessage(result).setPositiveButton("知道了",null).show();
-                else Toast.makeText(this,load ? "已读取槽 "+slot : "已保存到槽 "+slot,Toast.LENGTH_SHORT).show();
+                else {
+                    if (load) sessionRevision++;
+                    Toast.makeText(this, (load ? "已读取 · " : "已保存 · ") + StateSlots.title(slot), Toast.LENGTH_SHORT).show();
+                }
                 progress.dismiss();
                 if (autoPending) { autoPending = false; saveAutomatic(); }
                 applyPause();
@@ -567,6 +607,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         });
     }
     private void restartForState(int slot) {
+        playTime.running(false, SystemClock.elapsedRealtime()); checkpointPlayTime();
         cancelMouse(); closing = true; handler.removeCallbacks(statusUpdate); Native.pause(true);
         stateIo.execute(() -> {
             Native.stop();
@@ -647,12 +688,13 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         }).setNegativeButton("取消", null).show();
     }
     private void saveAutomatic() {
-        if (!autoEnabled || !everRunning || closing || startupFailed || autoSaving) return;
+        if (!everRunning || closing || startupFailed || autoSaving || autoSavedRevision == sessionRevision) return;
         if (stateBusy) { autoPending = true; return; }
         autoSaving = true; applyPause();
+        long revision = sessionRevision;
         stateIo.execute(() -> {
             String error = null;
-            try { stateSlots().save(StateSlots.AUTO); } catch (Exception exception) { error = exception.getMessage(); }
+            try { stateSlots().save(StateSlots.AUTO); autoSavedRevision = revision; } catch (Exception exception) { error = exception.getMessage(); }
             String result = error;
             handler.post(() -> {
                 autoSaving = false;
@@ -722,7 +764,10 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
             handler.post(() -> {
                 stateBusy = false;
                 if (closing) return;
-                if (result.isEmpty()) Toast.makeText(this, path.isEmpty() ? "磁盘已取出" : "磁盘已装入", Toast.LENGTH_SHORT).show();
+                if (result.isEmpty()) {
+                    sessionRevision++;
+                    Toast.makeText(this, path.isEmpty() ? "磁盘已取出" : "磁盘已装入", Toast.LENGTH_SHORT).show();
+                }
                 else {
                     String detail;
                     switch (result) {
@@ -794,19 +839,35 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void confirmExit() {
         dialog().setTitle("退出游戏？")
-                .setMessage(autoEnabled ? "退出时会保存本次会话并提交磁盘写入，下次可从游戏卡片继续。" : "退出时会提交磁盘写入。需要保留当前机器进度时，请先使用游戏内存档或手动即时存档。")
+                .setMessage("退出时自动保存当前进度并提交磁盘写入，下次启动可选择从此处继续。")
                 .setPositiveButton("退出", (dialog, which) -> stop()).setNegativeButton("继续游玩", null).show();
     }
-    private void stop() {
+    private void stop() { stop(true); }
+    private void stop(boolean saveSession) {
         if (closing) return;
         cancelMouse();
+        playTime.running(false, SystemClock.elapsedRealtime()); checkpointPlayTime();
         closing = true; handler.removeCallbacks(statusUpdate);
+        handler.removeCallbacks(timeCheckpoint);
         if (nativeStarted) Native.pause(true);
+        long revision = sessionRevision;
         Toast.makeText(this, "正在退出并提交磁盘写入…", Toast.LENGTH_SHORT).show();
         stateIo.execute(() -> {
             String error = null;
-            if (nativeStarted && autoEnabled && everRunning && !startupFailed) {
-                try { stateSlots().save(StateSlots.AUTO); } catch (Exception exception) { error = exception.getMessage(); }
+            if (saveSession && nativeStarted && everRunning && !startupFailed && autoSavedRevision != revision) {
+                try { stateSlots().save(StateSlots.AUTO); autoSavedRevision = revision; } catch (Exception exception) { error = exception.getMessage(); }
+            }
+            if (error != null) {
+                String failure = error;
+                handler.post(() -> {
+                    closing = false; userPaused = true; appliedPause = true;
+                    if (resumed) handler.post(statusUpdate);
+                    dialog().setTitle("退出存档未完成").setMessage(failure)
+                            .setPositiveButton("重试退出", (dialog, which) -> stop())
+                            .setNeutralButton("退出但不保存", (dialog, which) -> stop(false))
+                            .setNegativeButton("返回游戏", null).show();
+                });
+                return;
             }
             if (nativeStarted) Native.stop();
             String result = error;
@@ -819,6 +880,9 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     @Override protected void onResume() {
         super.onResume(); resumed = true;
+        handler.removeCallbacks(statusUpdate);
+        if (nativeStarted && !closing) handler.post(statusUpdate);
+        handler.removeCallbacks(timeCheckpoint); handler.postDelayed(timeCheckpoint, 60000);
         requestFocus();
         applyPause();
     }
@@ -831,6 +895,8 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     @Override protected void onPause() {
         resumed = false; focusGranted = false; applyPause();
+        handler.removeCallbacks(statusUpdate); handler.removeCallbacks(timeCheckpoint);
+        checkpointPlayTime();
         saveAutomatic();
         if (audio != null) audio.abandonAudioFocusRequest(audioFocus);
         super.onPause();
@@ -844,6 +910,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { Native.surface(holder.getSurface()); }
     @Override public void surfaceDestroyed(SurfaceHolder holder) { cancelMouse(); Native.surface(null); }
     @Override protected void onDestroy() {
+        playTime.running(false, SystemClock.elapsedRealtime()); checkpointPlayTime();
         if (audio != null) audio.unregisterAudioDeviceCallback(audioDevices);
         unregisterReceiver(noisyAudio);
         handler.removeCallbacksAndMessages(null);
@@ -851,7 +918,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
         closing = true;
         if (unexpected && nativeStarted) stateIo.execute(() -> {
             Native.pause(true);
-            if (autoEnabled && everRunning && !startupFailed) try { stateSlots().save(StateSlots.AUTO); } catch (Exception ignored) { }
+            if (everRunning && !startupFailed && autoSavedRevision != sessionRevision) try { stateSlots().save(StateSlots.AUTO); } catch (Exception ignored) { }
             Native.stop();
             if (isFinishing()) android.os.Process.killProcess(android.os.Process.myPid());
         });
