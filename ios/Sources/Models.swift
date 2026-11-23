@@ -96,6 +96,7 @@ enum Binary {
             guard result.count < 64, length - offset >= 0x2b0 else { throw NECError(message: "D88 文件头或内嵌盘数量无效") }
             try handle.seek(toOffset: offset); let header = try handle.read(upToCount: 0x2b0) ?? Data()
             guard header.count == 0x2b0 else { throw NECError(message: "D88 文件已截断") }
+            if offset == 0 && String(data: header.prefix(16), encoding: .ascii) == "M88 RawDiskImage" { return ["Raw Disk"] }
             let size = UInt64(u32(header, 0x1c)); guard size >= 0x2b0, size <= length - offset else { throw NECError(message: "D88 内嵌盘大小无效") }
             let name = Data(header.prefix(17).prefix { $0 != 0 }); result.append(String(data: name, encoding: oemJapanese) ?? "磁盘 \(result.count + 1)")
             offset += size

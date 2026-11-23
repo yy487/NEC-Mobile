@@ -59,7 +59,14 @@ final class LibraryFiles {
         defer { try? fileManager.removeItem(at: temporary) }
         try checked(NECBridge.gunzip(source.path, target: temporary.path)); try fileManager.moveItem(at: temporary, to: target); return target
     }
-    func diskInfo(_ file: URL) -> [String: Any] { (try? JSONSerialization.jsonObject(with: Data(NECBridge.inspectDisk(file.path).utf8))) as? [String: Any] ?? [:] }
+    func diskInfo(_ file: URL) -> [String: Any] {
+        var result = (try? JSONSerialization.jsonObject(with: Data(NECBridge.inspectDisk(file.path).utf8))) as? [String: Any] ?? [:]
+        func decode(_ value: String) -> String { value.data(using: .isoLatin1).flatMap { String(data: $0, encoding: oemJapanese) } ?? value }
+        if let programs = result["programs"] as? [String] { result["programs"] = programs.map(decode) }
+        for key in ["autoexec", "config"] { if let text = result[key] as? String { result[key] = decode(text) } }
+        if let entries = result["entries"] as? [[String: Any]] { result["entries"] = entries.map { entry in var value = entry; if let name = value["name"] as? String { value["name"] = decode(name) }; return value } }
+        return result
+    }
     func validate(_ game: Game) throws {
         for ref in [game.floppyA, game.floppyB, game.hardDisk] { _ = try path(game, ref) }
         guard game.floppyA == nil || game.floppyA != game.floppyB else { throw NECError(message: "同一内嵌盘不能同时装入 A、B") }
