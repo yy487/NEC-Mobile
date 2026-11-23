@@ -19,9 +19,12 @@ classes.mkdir(parents=True, exist_ok=True)
 subprocess.run(['javac', '-encoding', 'UTF-8', '-d', str(classes), str(ROOT / 'app/src/main/java/org/necmobile/MachineOptions.java'),
                 str(ROOT / 'ios/Tools/ExportOptions.java')], check=True)
 subprocess.run(['java', '-cp', str(classes), 'org.necmobile.ExportOptions', str(resources / 'machine-options.json')], check=True)
+subprocess.run(['swift', str(ROOT / 'ios/Tools/AppIcon.swift'), str(app)], check=True)
 version = dict(line.split('=', 1) for line in (ROOT / 'version.properties').read_text(encoding='utf-8').splitlines() if '=' in line)
 plist = app / 'Info.plist'
 with plist.open('rb') as source: info = plistlib.load(source)
 info['CFBundleShortVersionString'] = version['versionName']
 info['CFBundleVersion'] = version['versionCode']
+info['CFBundleIcons'] = {'CFBundlePrimaryIcon': {'CFBundleIconFiles': ['AppIcon60'], 'UIPrerenderedIcon': False}}
+info['CFBundleIcons~ipad'] = {'CFBundlePrimaryIcon': {'CFBundleIconFiles': ['AppIcon60', 'AppIcon76', 'AppIcon83.5'], 'UIPrerenderedIcon': False}}
 with plist.open('wb') as output: plistlib.dump(info, output)

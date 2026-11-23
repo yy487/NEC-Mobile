@@ -8,9 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def run(*args): return subprocess.check_output(list(args), text=True).strip()
 runtimes = json.loads(run('xcrun', 'simctl', 'list', 'runtimes', '-j'))['runtimes']
 runtime = next(item for item in reversed(runtimes) if item.get('isAvailable') and '.iOS-' in item['identifier'])
-types = json.loads(run('xcrun', 'simctl', 'list', 'devicetypes', '-j'))['devicetypes']
-device_type = next(item for item in reversed(types) if item['name'].startswith('iPhone '))
-device = run('xcrun', 'simctl', 'create', 'NEC Mobile CI', device_type['identifier'], runtime['identifier'])
+available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '-j'))['devices'].get(runtime['identifier'], [])
+device_type = next((item['deviceTypeIdentifier'] for item in available if item['name'].startswith('iPhone') and item.get('deviceTypeIdentifier')), 'com.apple.CoreSimulator.SimDeviceType.iPhone-16')
+device = run('xcrun', 'simctl', 'create', 'NEC Mobile CI', device_type, runtime['identifier'])
 try:
     run('xcrun', 'simctl', 'boot', device)
     subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True)
