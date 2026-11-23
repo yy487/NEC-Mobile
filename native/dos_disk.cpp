@@ -1,4 +1,7 @@
+#include "dos_disk.h"
+#if defined(__ANDROID__)
 #include <jni.h>
+#endif
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
@@ -25,6 +28,7 @@ void require(bool condition, const char* message) { if (!condition) throw std::r
 void fatResult(FRESULT result, const char* operation) {
     if (result != FR_OK) throw std::runtime_error(std::string(operation) + " (FAT " + std::to_string(result) + ")");
 }
+#if defined(__ANDROID__)
 std::string jtext(JNIEnv* env, jstring value) {
     if (!value) return {};
     const char* text = env->GetStringUTFChars(value, nullptr);
@@ -38,6 +42,7 @@ std::string jbytes(JNIEnv* env, jbyteArray value) {
     env->GetByteArrayRegion(value, 0, jsize(result.size()), reinterpret_cast<jbyte*>(result.data()));
     return result;
 }
+#endif
 struct HdiDisk {
     FILE* file = nullptr;
     uint64_t volume = 0, bytes = 0;
@@ -208,9 +213,11 @@ void writeFile(const char* name, const std::string& bytes, bool replace) {
     fatResult(result, "Write DOS file"); fatResult(close, "Close DOS file");
     require(written == bytes.size(), "DOS disk is full");
 }
+#if defined(__ANDROID__)
 void throwJava(JNIEnv* env, const std::exception& error) {
     env->ThrowNew(env->FindClass("java/io/IOException"), error.what());
 }
+#endif
 void requireDosSystem() {
     FILINFO kernel{};
     bool freedos = f_stat("0:/KERNEL.SYS", &kernel) == FR_OK && !(kernel.fattrib & AM_DIR) && kernel.fsize > 0;
@@ -286,30 +293,23 @@ extern "C" DRESULT disk_ioctl(BYTE drive, BYTE command, void* buffer) {
     }
 }
 
-extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_hdiInfo(JNIEnv* env, jclass, jstring path) {
+std::string NecDos::info(const std::string& path) {
     std::lock_guard<std::mutex> lock(fatMutex);
-    try {
-        Volume volume(jtext(env, path), false); requireDosSystem(); DWORD free = 0; FATFS* filesystem = nullptr;
+        Volume volume(path, false); requireDosSystem(); DWORD free = 0; FATFS* filesystem = nullptr;
         fatResult(f_getfree("0:", &free, &filesystem), "Read free space");
         uint64_t available = uint64_t(free) * filesystem->csize * volume.disk.sectorSize;
         std::string info = std::string(filesystem->fs_type == FS_FAT16 ? "FAT16" : "FAT12") + " · " +
             std::to_string(volume.disk.sectorSize) + " B/sector · " + std::to_string(available / 1048576) + " MB free";
-        return env->NewStringUTF(info.c_str());
-    } catch (const std::exception& error) { throwJava(env, error); return nullptr; }
+        return info;
 }
-extern "C" JNIEXPORT jbyteArray JNICALL Java_org_necmobile_Native_dosAutoexec(JNIEnv* env, jclass, jstring path) {
+std::string NecDos::autoexec(const std::string& path) {
+    std::lock_guard<std::mutex> lock(fatMutex);
+    Volume volume(path, false); return readFile("0:/AUTOEXEC.BAT");
+}
+std::string NecDos::inspect(const std::string& path) {
     std::lock_guard<std::mutex> lock(fatMutex);
     try {
-        Volume volume(jtext(env, path), false); std::string data = readFile("0:/AUTOEXEC.BAT");
-        jbyteArray result = env->NewByteArray(jsize(data.size()));
-        env->SetByteArrayRegion(result, 0, jsize(data.size()), reinterpret_cast<const jbyte*>(data.data()));
-        return result;
-    } catch (const std::exception& error) { throwJava(env, error); return nullptr; }
-}
-extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_inspectDisk(JNIEnv* env, jclass, jstring path) {
-    std::lock_guard<std::mutex> lock(fatMutex);
-    try {
-        Volume volume(jtext(env, path), false, true);
+        Volume volume(path, false, true);
         std::vector<uint8_t> boot(volume.disk.sectorSize);
         require(volume.disk.transfer(0, 1, boot.data(), false), "Cannot read boot sector");
         std::string bootCode(reinterpret_cast<const char*>(boot.data()), boot.size());
@@ -373,40 +373,34 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_inspectDisk(JNIEn
                 ",\"boot\":" + jsonText(kind) + ",\"system\":" + jsonText(freedos ? "freedos" : msdos ? "msdos" : "") +
                 ",\"sectorSize\":" + std::to_string(volume.disk.sectorSize) + ",\"autoexec\":" + jsonText(readFile("0:/AUTOEXEC.BAT")) +
                 ",\"config\":" + jsonText(readFile("0:/CONFIG.SYS")) + ",\"entries\":[" + entries + "],\"programs\":[" + programs + "]}";
-        return env->NewStringUTF(result.c_str());
+        return result;
     } catch (const std::exception& error) {
         std::string result = "{\"supported\":false,\"reason\":" + jsonText(error.what()) + "}";
-        return env->NewStringUTF(result.c_str());
+        return result;
     }
 }
-extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_prepareFloppy(JNIEnv* env, jclass, jstring input, jstring destination,
-        jbyteArray autoexec, jbyteArray config, jobjectArray hosts, jobjectArray names, jbyteArray label) {
+void NecDos::floppy(const std::string& input, const std::string& target, const std::optional<std::string>& autoexec, const std::optional<std::string>& config, const std::vector<File>& files, const std::optional<std::string>& label) {
     std::lock_guard<std::mutex> lock(fatMutex);
-    std::string target = jtext(env, destination);
     bool created = false;
     try {
-        require(env->GetArrayLength(hosts) == env->GetArrayLength(names), "Driver file list differs");
-        copyDisk(jtext(env, input), target, created);
+        copyDisk(input, target, created);
         Volume volume(target, true, true);
         if (autoexec) {
             requireDosSystem();
             f_chmod("0:/AUTOEXEC.BAT", 0, AM_RDO);
-            writeFile("0:/AUTOEXEC.BAT", jbytes(env, autoexec), true);
+            writeFile("0:/AUTOEXEC.BAT", *autoexec, true);
         }
         if (config) {
             f_chmod("0:/CONFIG.SYS", 0, AM_RDO);
-            writeFile("0:/CONFIG.SYS", jbytes(env, config), true);
+            writeFile("0:/CONFIG.SYS", *config, true);
         }
-        if (env->GetArrayLength(hosts)) {
+        if (files.size()) {
             FRESULT result = f_mkdir("0:/NECMOB");
             if (result != FR_EXIST) fatResult(result, "Create driver directory");
         }
         std::array<char,65536> chunk{};
-        for (jsize index = 0; index < env->GetArrayLength(hosts); ++index) {
-            auto hostObject = static_cast<jstring>(env->GetObjectArrayElement(hosts, index));
-            auto nameObject = static_cast<jbyteArray>(env->GetObjectArrayElement(names, index));
-            std::string host = jtext(env, hostObject), name = jbytes(env, nameObject);
-            env->DeleteLocalRef(hostObject); env->DeleteLocalRef(nameObject);
+        for (const auto& item : files) {
+            const auto& host = item.host; const auto& name = item.name;
             require(!name.empty() && name.find_first_of("/\\:") == std::string::npos && name.find('\0') == std::string::npos && name != "." && name != "..", "Invalid driver name");
             std::ifstream source(host, std::ios::binary);
             require(bool(source), "Cannot read driver");
@@ -422,31 +416,26 @@ extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_prepareFloppy(JNIEnv
             FRESULT closed = f_close(&file);
             require(copied && closed == FR_OK, "Cannot finish driver copy");
         }
-        if (label) fatResult(f_setlabel(("0:" + jbytes(env, label)).c_str()), "Set volume label");
+        if (label) fatResult(f_setlabel(("0:" + *label).c_str()), "Set volume label");
         fatResult(f_mount(nullptr, "0:", 0), "Close floppy volume");
         require(fflush(volume.disk.file) == 0 && fsync(fileno(volume.disk.file)) == 0, "Floppy write failed");
     } catch (const std::exception& error) {
         if (created) unlink(target.c_str());
-        throwJava(env, error);
+        throw;
     }
 }
-extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_buildDosDisk(JNIEnv* env, jclass, jstring input, jstring destination, jobjectArray hosts, jobjectArray names, jbyteArray startup, jbyteArray autoexec) {
+void NecDos::build(const std::string& input, const std::string& target, const std::vector<File>& files, const std::string& startup, const std::string& autoexec) {
     std::lock_guard<std::mutex> lock(fatMutex);
-    std::string target = jtext(env, destination);
     bool created = false;
     try {
-        require(env->GetArrayLength(hosts) == env->GetArrayLength(names), "DOS import file list differs");
-        copyDisk(jtext(env, input), target, created);
+        copyDisk(input, target, created);
         std::array<char,65536> chunk{};
         Volume volume(target, true);
         requireDosSystem();
         fatResult(f_mkdir("0:/NECGAME"), "Template already has NECGAME or has insufficient space");
         fatResult(f_mkdir("0:/NECMOB"), "Template already has NECMOB or has insufficient space");
-        for (jsize index = 0; index < env->GetArrayLength(hosts); index++) {
-            auto hostObject = static_cast<jstring>(env->GetObjectArrayElement(hosts, index));
-            auto nameObject = static_cast<jbyteArray>(env->GetObjectArrayElement(names, index));
-            std::string host = jtext(env, hostObject), relative = jbytes(env, nameObject);
-            env->DeleteLocalRef(hostObject); env->DeleteLocalRef(nameObject);
+        for (const auto& item : files) {
+            const auto& host = item.host; const auto& relative = item.name;
             require(!relative.empty() && relative.front() != '/' && relative.find(':') == std::string::npos && relative.find('\0') == std::string::npos, "Invalid DOS file path");
             require(relative != ".." && relative.find("../") == std::string::npos && relative.find("/..") == std::string::npos, "DOS file path escapes game directory");
             std::string guest = "0:/NECGAME/" + relative;
@@ -463,13 +452,53 @@ extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_buildDosDisk(JNIEnv*
             FRESULT close = f_close(&file);
             if (!good || close != FR_OK) throw std::runtime_error("Game file write failed or DOS disk is full: " + host);
         }
-        writeFile("0:/NECMOB/START.BAT", jbytes(env, startup), false);
+        writeFile("0:/NECMOB/START.BAT", startup, false);
         f_chmod("0:/AUTOEXEC.BAT", 0, AM_RDO);
-        writeFile("0:/AUTOEXEC.BAT", jbytes(env, autoexec), true);
+        writeFile("0:/AUTOEXEC.BAT", autoexec, true);
         fatResult(f_mount(nullptr, "0:", 0), "Close DOS volume");
         require(fflush(volume.disk.file) == 0 && fsync(fileno(volume.disk.file)) == 0, "Commit DOS hard disk failed");
     } catch (const std::exception& error) {
         if (created) unlink(target.c_str());
-        throwJava(env, error);
+        throw;
     }
 }
+
+#if defined(__ANDROID__)
+namespace {
+std::vector<NecDos::File> importFiles(JNIEnv* env, jobjectArray hosts, jobjectArray names) {
+    require(env->GetArrayLength(hosts) == env->GetArrayLength(names), "File lists differ");
+    std::vector<NecDos::File> files;
+    for (jsize i = 0; i < env->GetArrayLength(hosts); i++) {
+        auto host = static_cast<jstring>(env->GetObjectArrayElement(hosts, i));
+        auto name = static_cast<jbyteArray>(env->GetObjectArrayElement(names, i));
+        files.push_back({jtext(env, host), jbytes(env, name)});
+        env->DeleteLocalRef(host); env->DeleteLocalRef(name);
+    }
+    return files;
+}
+}
+extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_hdiInfo(JNIEnv* env, jclass, jstring path) {
+    try { return env->NewStringUTF(NecDos::info(jtext(env,path)).c_str()); }
+    catch (const std::exception& error) { throwJava(env,error); return nullptr; }
+}
+extern "C" JNIEXPORT jbyteArray JNICALL Java_org_necmobile_Native_dosAutoexec(JNIEnv* env, jclass, jstring path) {
+    try { auto data=NecDos::autoexec(jtext(env,path)); auto result=env->NewByteArray(jsize(data.size()));
+          env->SetByteArrayRegion(result,0,jsize(data.size()),reinterpret_cast<const jbyte*>(data.data())); return result; }
+    catch (const std::exception& error) { throwJava(env,error); return nullptr; }
+}
+extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_inspectDisk(JNIEnv* env, jclass, jstring path) {
+    return env->NewStringUTF(NecDos::inspect(jtext(env,path)).c_str());
+}
+extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_prepareFloppy(JNIEnv* env, jclass, jstring input, jstring target,
+        jbyteArray autoexec, jbyteArray config, jobjectArray hosts, jobjectArray names, jbyteArray label) {
+    try { NecDos::floppy(jtext(env,input),jtext(env,target), autoexec ? std::optional<std::string>(jbytes(env,autoexec)) : std::nullopt,
+          config ? std::optional<std::string>(jbytes(env,config)) : std::nullopt, importFiles(env,hosts,names),
+          label ? std::optional<std::string>(jbytes(env,label)) : std::nullopt); }
+    catch (const std::exception& error) { throwJava(env,error); }
+}
+extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_buildDosDisk(JNIEnv* env, jclass, jstring input, jstring target,
+        jobjectArray hosts, jobjectArray names, jbyteArray startup, jbyteArray autoexec) {
+    try { NecDos::build(jtext(env,input),jtext(env,target),importFiles(env,hosts,names),jbytes(env,startup),jbytes(env,autoexec)); }
+    catch (const std::exception& error) { throwJava(env,error); }
+}
+#endif

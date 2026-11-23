@@ -151,6 +151,16 @@ else ifeq ($(platform), osx)
 		LDFLAGS += $(ARCHFLAGS)
 	endif
 
+# NEC Mobile iOS device and simulator builds
+else ifeq ($(platform), necmobile_ios)
+	TARGET := np2kai
+	fpic := -fPIC
+	SHARED := -dynamiclib -Wl,-install_name,@rpath/np2kai.framework/np2kai
+	CC = clang -target $(APPLE_TARGET) -isysroot $(IOSSDK)
+	CXX = clang++ -target $(APPLE_TARGET) -isysroot $(IOSSDK)
+	CXX_VER = -std=c++14
+	COMMONFLAGS += -fvisibility=hidden -Wno-incompatible-function-pointer-types
+
 # iOS
 else ifneq (,$(findstring ios,$(platform)))
 	# Theos iOS

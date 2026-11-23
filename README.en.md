@@ -4,10 +4,10 @@
 
 Play PC-88 and PC-98 games on Android. NEC Mobile brings the M88 PC-88 core and the NP2kai PC-98 core into one app, with separate game libraries, resources, and machine settings for each platform.
 
-Version **0.26.8**, for **ARM64 devices running Android 8.0 or later**.
+Version **0.26.9**, for **ARM64 devices running Android 8.0 or later**.
 
-- Android APK `NEC-Mobile-0.26.8-arm64.apk`
-- Source archive `NEC-Mobile-0.26.8-sources.zip`
+- Android APK `NEC-Mobile-0.26.9-arm64.apk`
+- Source archive `NEC-Mobile-0.26.9-sources.zip`
 
 ## Features
 
@@ -72,7 +72,9 @@ The list contains floppy disks imported for that game. For a D88 file containing
 
 ## Saves and progress
 
-Open **菜单 → 即时存档 / 读档** to access six slots. Select a slot to save, load, or delete a state. You can load an existing state after starting the game again.
+Open **菜单 → 即时存档 / 读档** to manage six manual slots, the quick slot, and the automatic session slot. You can load an existing state after starting the game again.
+
+Manual, quick, and automatic states use fast streaming compression. Older states remain readable and are compressed after a successful load. After exiting the game, use **设置 → 数据占用与清理 → 压缩已有即时档** to compress existing slots and see the space reclaimed. Compressed states require version 0.26.9 or later. Saving and loading briefly use uncompressed temporary files, which are removed when the operation finishes.
 
 A save state contains the CPU, memory, device state, mounted disk selection, and MIDI channels. Loading a state combines the restored machine state with the disks' current contents. The game's own save function writes progress to the disk copies.
 

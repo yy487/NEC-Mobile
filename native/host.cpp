@@ -2,10 +2,15 @@
 #include "machine_config.h"
 #include "midi_synth.h"
 #include "snapshot_meta.h"
+#include "platform_log.h"
+#if defined(__ANDROID__)
 #include <jni.h>
 #include <android/native_window_jni.h>
-#include <android/log.h>
 #include <aaudio/AAudio.h>
+#else
+#include "../ios/Native/ApplePlatform.h"
+#include "host_engine.h"
+#endif
 #include <dlfcn.h>
 #include <algorithm>
 #include <array>
@@ -28,7 +33,9 @@
 namespace {
 std::mutex windowMutex, statusMutex, commandMutex;
 std::condition_variable wake;
+#if defined(__ANDROID__)
 ANativeWindow* window;
+#endif
 std::thread worker;
 std::atomic<bool> stopping{false}, paused{false};
 std::atomic<bool> frameReceived{false};
@@ -43,7 +50,11 @@ std::atomic<int> startState{0};
 std::array<std::string, 2> driveMedia;
 std::array<int, 2> driveIndices{};
 unsigned videoWidth, videoHeight;
+#if defined(__ANDROID__)
 AAudioStream* stream;
+#else
+bool stream = false;
+#endif
 unsigned audioRate;
 unsigned sourceRate, requestedAudioRate, audioBufferMs = 40;
 double hostSpeed = 1.0, resamplePosition = 0;
@@ -68,7 +79,7 @@ enum { Key, Mouse, Mount, Flush, Reset, Pause, Resume, ReleaseKeys, ReopenAudio,
 
 void message(const char* text) {
     if (!text) return;
-    __android_log_write(ANDROID_LOG_INFO, "NECMobile", text);
+    necLog(NecLogInfo, "NECMobile", text);
     std::lock_guard<std::mutex> lock(statusMutex);
     status = text;
     if (status.rfind("PC-98 config:", 0) == 0 || status.rfind("PC-88 config:", 0) == 0 || status.rfind("PC-98 sound BIOS loaded:", 0) == 0 || status.rfind("PC-98 font loaded:", 0) == 0) {
@@ -78,14 +89,14 @@ void message(const char* text) {
     // Old M88 messages may contain CP932. NewStringUTF must receive valid UTF-8.
     for (char& byte : status) if (static_cast<unsigned char>(byte) >= 128) byte = '?';
 }
-aaudio_data_callback_result_t audioCallback(AAudioStream*, void*, void* output, int32_t frames) {
+void fillAudio(void* output, int32_t frames) {
     auto* destination = static_cast<int16_t*>(output);
     uint64_t read = audioRead.load(std::memory_order_relaxed);
     uint64_t write = audioWrite.load(std::memory_order_acquire);
     if (paused.load(std::memory_order_relaxed) || stopping.load(std::memory_order_relaxed)) {
         std::fill(destination, destination + frames * 2, 0);
         audioRead.store(write, std::memory_order_release);
-        return AAUDIO_CALLBACK_RESULT_CONTINUE;
+        return;
     }
     size_t available = std::min<uint64_t>(frames, write - read);
     for (size_t i = 0; i < available; ++i) {
@@ -94,20 +105,31 @@ aaudio_data_callback_result_t audioCallback(AAudioStream*, void*, void* output, 
     }
     std::fill(destination + available * 2, destination + frames * 2, 0);
     audioRead.store(read + available, std::memory_order_release);
-    return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
+#if defined(__ANDROID__)
+aaudio_data_callback_result_t audioCallback(AAudioStream*, void*, void* output, int32_t frames) {
+    fillAudio(output, frames); return AAUDIO_CALLBACK_RESULT_CONTINUE;
+}
+#endif
 void closeAudio() {
+#if defined(__ANDROID__)
     if (stream) { AAudioStream_requestStop(stream); AAudioStream_close(stream); }
     stream = nullptr;
+#else
+    if (stream) necAppleCloseAudio();
+    stream = false;
+#endif
     audioRate = 0;
     sourceRate = 0; resamplePosition = 0; havePreviousSample = false;
     audioRead.store(0);
     audioWrite.store(0);
 }
+#if defined(__ANDROID__)
 void audioError(AAudioStream*, void*, aaudio_result_t) {
     // AAudio forbids closing the stream from its error callback.
     audioDisconnected.store(true, std::memory_order_release);
 }
+#endif
 void audio(const int16_t* samples, size_t frames, unsigned rate) {
     // Advance synthesis even while an output device is being rebuilt.
     if (midiSynth.enabled()) {
@@ -121,6 +143,7 @@ void audio(const int16_t* samples, size_t frames, unsigned rate) {
         if (std::chrono::steady_clock::now() < audioRetry) return;
         closeAudio();
         audioRetry = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+#if defined(__ANDROID__)
         AAudioStreamBuilder* builder = nullptr;
         if (AAudio_createStreamBuilder(&builder) != AAUDIO_OK) return;
         AAudioStreamBuilder_setDirection(builder, AAUDIO_DIRECTION_OUTPUT);
@@ -146,6 +169,13 @@ void audio(const int16_t* samples, size_t frames, unsigned rate) {
             std::to_string(audioRate) + " Hz / " + std::to_string(AAudioStream_getBufferSizeInFrames(stream)) + " frames\nBurst: " +
             std::to_string(burst) + " frames / device " + std::to_string(AAudioStream_getDeviceId(stream)); }
         if (AAudioStream_requestStart(stream) != AAUDIO_OK) { closeAudio(); return; }
+#else
+        audioRate = necAppleOpenAudio(requestedAudioRate, audioBufferMs, fillAudio, [] { audioDisconnected.store(true); });
+        stream = audioRate != 0;
+        if (!stream) { message("Audio unavailable; emulation continues muted"); return; }
+        { std::lock_guard<std::mutex> lock(statusMutex);
+          audioInfo = "Apple audio: " + std::to_string(audioRate) + " Hz / " + std::to_string(audioBufferMs) + " ms"; }
+#endif
         sourceRate = rate;
         message("Audio output ready");
     }
@@ -183,6 +213,7 @@ void video(const uint32_t* pixels, unsigned width, unsigned height) {
         if (now - lastVideo < std::chrono::microseconds(16667)) return;
         lastVideo = now;
     }
+#if defined(__ANDROID__)
     std::lock_guard<std::mutex> lock(windowMutex);
     if (!window) return;
     if (videoWidth != width || videoHeight != height) {
@@ -196,6 +227,9 @@ void video(const uint32_t* pixels, unsigned width, unsigned height) {
             memcpy(static_cast<uint32_t*>(buffer.bits) + y * buffer.stride, pixels + y * width, width * 4);
     }
     ANativeWindow_unlockAndPost(window);
+#else
+    necApplePresentFrame(pixels, width, height);
+#endif
 }
 void enqueue(Command command) {
     std::lock_guard<std::mutex> lock(commandMutex);
@@ -315,7 +349,11 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                 throw std::runtime_error("MIDI soundfont cannot be loaded; import a valid SF2 or turn MIDI off");
             message("MIDI synthesizer ready");
         }
+#if defined(__ANDROID__)
         library = dlopen(platform == 88 ? "libpc88.so" : "libpc98.so", RTLD_NOW | RTLD_LOCAL);
+#else
+        library = dlopen(necAppleCorePath(platform).c_str(), RTLD_NOW | RTLD_LOCAL);
+#endif
         if (!library) throw std::runtime_error(dlerror());
         auto entry = reinterpret_cast<const NecCore* (*)()>(dlsym(library, "nec_core"));
         if (!entry) throw std::runtime_error("Native core entry is missing");
@@ -325,7 +363,7 @@ void run(int platform, std::string directory, std::string disk, std::string seco
         if (!core->open(directory.c_str(), platform == 88 ? "" : disk.c_str(), platform == 88 ? "" : secondDisk.c_str(), mode, {video, audio, message, [](uint8_t byte) {
                 if (midiSynth.enabled()) { if (!midiReceived) { midiReceived=true; message("MIDI hardware output active"); } midiSynth.write(byte); }
             }, [](const char* text) {
-                __android_log_write(ANDROID_LOG_WARN, "NECMobile", text);
+                necLog(NecLogWarning, "NECMobile", text);
                 std::lock_guard<std::mutex> lock(statusMutex);
                 startupWarning = text;
             }})) {
@@ -511,6 +549,7 @@ void run(int platform, std::string directory, std::string disk, std::string seco
       for (auto& command:commands) if (command.result) command.result->set_value("Game session has stopped");
       commands.clear(); }
 }
+#if defined(__ANDROID__)
 std::string string(JNIEnv* env, jstring value) {
     if (!value) return {};
     const char* text = env->GetStringUTFChars(value, nullptr);
@@ -518,8 +557,10 @@ std::string string(JNIEnv* env, jstring value) {
     if (text) env->ReleaseStringUTFChars(value, text);
     return copy;
 }
+#endif
 }
 
+#if defined(__ANDROID__)
 extern "C" JNIEXPORT jboolean JNICALL Java_org_necmobile_Native_start(JNIEnv* env, jclass, jint platform, jstring dir, jstring disk, jstring secondDisk, jint mode, jint firstIndex, jint secondIndex, jboolean mouseEnabled) {
     if (worker.joinable()) return false;
     stopping.store(false); paused.store(true); frameReceived.store(false); guestMouseActive.store(false);
@@ -605,3 +646,46 @@ extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_stop(JNIEnv*, jclass
     stopping.store(true); wake.notify_all();
     if (worker.joinable()) worker.join();
 }
+#else
+namespace NecEngine {
+bool start(int platform, const std::string& directory, const std::string& disk, const std::string& second,
+           int mode, int firstIndex, int secondIndex, bool mouseEnabled) {
+    if (worker.joinable()) return false;
+    stopping.store(false); paused.store(true); frameReceived.store(false); guestMouseActive.store(false);
+    videoGeometry.store(0); midiReceived = midiAudible = false; workerRunning.store(true);
+    { std::lock_guard<std::mutex> lock(commandMutex); commands.clear(); }
+    { std::lock_guard<std::mutex> lock(statusMutex); driveMedia = {}; driveIndices = {}; startupWarning.clear(); startupError.clear(); machineInfo.clear(); }
+    startState.store(1);
+    worker = std::thread(run, platform, directory, disk, second, mode, firstIndex, secondIndex, mouseEnabled);
+    return true;
+}
+void stop() { stopping.store(true); wake.notify_all(); if (worker.joinable()) worker.join(); }
+void pause(bool value) { enqueue({value ? Pause : Resume}); }
+void key(int code, bool down) { enqueue({Key, code, down}); }
+void mouse(int x, int y, int buttons) { enqueue({Mouse, x, y, buttons}); }
+void releaseKeys() { enqueue({ReleaseKeys}); }
+void reset() { enqueue({Reset}); }
+void flush() { enqueue({Flush}); }
+void audioChanged() { enqueue({ReopenAudio}); }
+std::string request(Command command) {
+    command.result = std::make_shared<std::promise<std::string>>(); auto result = command.result->get_future();
+    { std::lock_guard<std::mutex> lock(commandMutex);
+      if (!workerRunning.load() || stopping.load()) return "Game session has stopped";
+      commands.push_back(std::move(command)); }
+    wake.notify_one(); return result.get();
+}
+std::string mount(int drive, const std::string& path, int index) { return request({Mount, drive, index, 0, path}); }
+std::string state(const std::string& path, bool load) { return request({load ? LoadState : SaveState, 0, 0, 0, path}); }
+std::string statusText() { std::lock_guard<std::mutex> lock(statusMutex); return status; }
+std::string errorText() { std::lock_guard<std::mutex> lock(statusMutex); return startupError; }
+std::string machineText() { std::lock_guard<std::mutex> lock(statusMutex); return machineInfo; }
+std::string audioText() { std::lock_guard<std::mutex> lock(statusMutex); return audioInfo; }
+std::string takeWarning() { std::lock_guard<std::mutex> lock(statusMutex); auto result = startupWarning; startupWarning.clear(); return result; }
+std::string disk(int drive) { std::lock_guard<std::mutex> lock(statusMutex); return drive >= 0 && drive < 2 ? driveMedia[drive] : ""; }
+int diskIndex(int drive) { std::lock_guard<std::mutex> lock(statusMutex); return drive >= 0 && drive < 2 ? driveIndices[drive] : 0; }
+int startup() { return startState.load(); }
+uint32_t geometry() { return videoGeometry.load(); }
+bool mouseActive() { return guestMouseActive.load(); }
+bool validSoundFont(const std::string& path) { try { return MidiSynth::validate(path); } catch (...) { return false; } }
+}
+#endif

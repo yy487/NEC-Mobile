@@ -1,0 +1,54 @@
+name: iOS build
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios-port]
+    paths:
+      - '.github/workflows/ios.yml'
+      - 'ios/**'
+      - 'native/**'
+      - 'scripts/*ios*.py'
+      - 'third_party/**'
+      - 'app/src/main/java/org/necmobile/MachineOptions.java'
+permissions:
+  contents: read
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Show Apple toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          cmake --version
+      - name: Build iPhone and iPad IPA
+        run: python3 scripts/build_ios.py
+      - name: Build simulator app
+        run: python3 scripts/build_ios.py --simulator
+      - name: Run simulator smoke check
+        run: python3 scripts/smoke_ios.py
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: NEC-Mobile-iOS
+          path: |
+            release/NEC-Mobile-iOS-unsigned.ipa
+            release/NEC-Mobile-iOS-simulator.zip
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: iOS-build-diagnostics
+          path: |
+            work/ios-device/CMakeFiles/CMakeConfigureLog.yaml
+            work/ios-simulator/CMakeFiles/CMakeConfigureLog.yaml
+            work/ios-smoke.log

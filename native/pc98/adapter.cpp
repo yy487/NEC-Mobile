@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
-#include <android/log.h>
+#include "../platform_log.h"
 
 #define RETRO_FUNCTIONS(X) \
     X(retro_set_environment) X(retro_set_video_refresh) X(retro_set_audio_sample) \
@@ -62,7 +62,7 @@ static void coreLog(retro_log_level level, const char* format, ...) {
     vsnprintf(text, sizeof(text), format, args);
     va_end(args);
     // Missing optional firmware is logged by the core while probing; it is not a fatal UI error.
-    __android_log_write(level >= RETRO_LOG_ERROR ? ANDROID_LOG_ERROR : ANDROID_LOG_WARN, "NP2kai", text);
+    necLog(level >= RETRO_LOG_ERROR ? NecLogError : NecLogWarning, "NP2kai", text);
 }
 static void definitions(const retro_core_option_definition* list) {
     if (!list) return;
@@ -232,7 +232,17 @@ static bool openCore(const char* directory, const char* disk, const char* second
     mouseButtons = 0;
     pixelFormat = RETRO_PIXEL_FORMAT_0RGB1555;
     if (chdir(directory)) return false;
+#if defined(__APPLE__)
+    Dl_info image{};
+    if (!dladdr(reinterpret_cast<const void*>(&openCore), &image) || !image.dli_fname) return false;
+    std::string binary(image.dli_fname);
+    auto framework = binary.find_last_of('/');
+    auto parent = binary.find_last_of('/', framework - 1);
+    std::string corePath = binary.substr(0, parent) + "/np2kai.framework/np2kai";
+    library = dlopen(corePath.c_str(), RTLD_NOW | RTLD_LOCAL);
+#else
     library = dlopen("libnp2kai.so", RTLD_NOW | RTLD_LOCAL);
+#endif
     if (!library) { host.message(dlerror()); return false; }
 #define LOAD(name) p_##name = reinterpret_cast<decltype(p_##name)>(dlsym(library, #name)); if (!p_##name) { closeCore(); return false; }
     RETRO_FUNCTIONS(LOAD)
