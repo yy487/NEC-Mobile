@@ -67,10 +67,10 @@ struct PlayerView: View {
                 Button("将当前画面设为封面") { capture() }
                 DisclosureGroup("实际音频输出与机器配置") { Text(NECBridge.audioInfo()).font(.caption); Text(AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portName).joined(separator: " / ")).font(.caption); Text(session.machineInfo).font(.caption) }
                 Button("复位机器", role: .destructive) { reset = true }
+                    .confirmationDialog("复位机器？", isPresented: $reset, titleVisibility: .visible) { Button("复位", role: .destructive) { session.reset() }; Button("取消", role: .cancel) {} } message: { Text("未保存的机器进度会丢失。") }
                 Button("退出游戏", role: .destructive) { exit = true }
+                    .confirmationDialog("退出游戏？", isPresented: $exit, titleVisibility: .visible) { Button("保存并退出") { session.panel = nil; session.stop() }; Button("继续游玩", role: .cancel) {} }
             }.navigationTitle("游戏菜单")
-                .confirmationDialog("退出游戏？", isPresented: $exit, titleVisibility: .visible) { Button("保存并退出") { session.panel = nil; session.stop() }; Button("继续游玩", role: .cancel) {} }
-                .confirmationDialog("复位机器？", isPresented: $reset, titleVisibility: .visible) { Button("复位", role: .destructive) { session.reset() }; Button("取消", role: .cancel) {} } message: { Text("未保存的机器进度会丢失。") }
         case .states: StateSlotsView(session: session)
         case .disks: RuntimeDisksView(session: session)
         case .input: InputSettingsView(session: session)
