@@ -1,6 +1,11 @@
 name: iOS build
 on:
   workflow_dispatch:
+    inputs:
+      device_only:
+        description: '仅构建设备 IPA'
+        type: boolean
+        default: false
   push:
     branches: [main, ios-port]
     paths:
@@ -17,7 +22,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ios-${{ github.ref }}
+  group: ios-${{ github.ref }}${{ inputs.device_only && '-device' || '' }}
   cancel-in-progress: false
 jobs:
   build:
@@ -43,11 +48,13 @@ jobs:
           path: release/NEC-Mobile-iOS-unsigned.ipa
           retention-days: 14
       - name: Build simulator app
+        if: ${{ !inputs.device_only }}
         run: python3 scripts/build_ios.py --simulator
       - name: Run simulator smoke check
+        if: ${{ !inputs.device_only }}
         run: python3 scripts/smoke_ios.py
       - uses: actions/upload-artifact@v4
-        if: success()
+        if: success() && !inputs.device_only
         with:
           name: NEC-Mobile-iOS
           path: |
@@ -55,7 +62,7 @@ jobs:
             release/NEC-Mobile-iOS-simulator.zip
           retention-days: 14
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && !inputs.device_only
         with:
           name: iOS-simulator-check
           path: |
