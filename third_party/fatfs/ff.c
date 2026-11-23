@@ -3085,7 +3085,7 @@ static FRESULT create_name (	/* FR_OK: successful, FR_INVALID_NAME: could not cr
 	if (i == 0) return FR_INVALID_NAME;	/* Reject nul string */
 
 	if (sfn[0] == DDEM) sfn[0] = RDDEM;	/* If the first character collides with DDEM, replace it with RDDEM */
-	sfn[NSFLAG] = (c <= ' ' || p[si] <= ' ') ? NS_LAST : 0;	/* Set last segment flag if end of the path */
+	sfn[NSFLAG] = (c <= ' ' || (BYTE)p[si] <= ' ') ? NS_LAST : 0;	/* Set last segment flag if end of the path */
 
 	return FR_OK;
 #endif /* FF_USE_LFN */
