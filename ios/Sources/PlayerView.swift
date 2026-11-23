@@ -35,7 +35,7 @@ struct PlayerView: View {
                 if session.busy || session.closing { VStack { ProgressView(); Text(session.closing ? "正在保存并退出…" : session.message) }.padding(20).background(necSurface.opacity(0.95)).cornerRadius(15).frame(maxWidth: .infinity, maxHeight: .infinity) }
                 toolWheel(geometry)
                 if !session.message.isEmpty && !session.busy && !session.closing { Text(session.message).font(.caption).padding(10).background(necSurface.opacity(0.9)).cornerRadius(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 8).allowsHitTesting(false) }
-            }.onAppear { landscape = geometry.size.width > geometry.size.height; loadPosition(); OrientationDelegate.apply(session.game.options["display_orientation"] ?? "AUTO"); session.begin() }
+            }.onAppear { landscape = geometry.size.width > geometry.size.height; loadPosition(); OrientationDelegate.apply(session.game.options["display_orientation"] ?? "AUTO") }
                 .onChange(of: geometry.size) { size in session.cancelTouches?(); session.toolsExpanded = false; landscape = size.width > size.height; loadPosition() }
         }
         .statusBar(hidden: true).preferredColorScheme(.dark).tint(necAccent)

@@ -50,7 +50,11 @@ try:
     print(json.dumps(result, ensure_ascii=False, indent=2))
     for frame in (data / 'Documents').glob('pc*-frame.png'):
         (captures / frame.name).write_bytes(frame.read_bytes())
-    if result['status'] != 'passed': raise SystemExit(1)
+    if result['status'] != 'passed':
+        run('xcrun', 'simctl', 'io', device, 'screenshot', str(captures / 'failure.png'))
+        log = run('xcrun', 'simctl', 'spawn', device, 'log', 'show', '--last', '2m', '--style', 'compact', '--predicate', 'process == "NECMobile"')
+        (ROOT / 'work/ios-runtime.log').write_text(log, encoding='utf-8')
+        raise SystemExit(1)
 finally:
     subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
     subprocess.run(['xcrun', 'simctl', 'delete', device], check=False)

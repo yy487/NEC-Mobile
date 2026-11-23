@@ -248,7 +248,11 @@ final class LibraryStore: ObservableObject {
             catch { DispatchQueue.main.async { self.busy = false; self.progress = ""; self.error = error.localizedDescription } } }
     }
     func save(_ game: Game, complete: @escaping () -> Void = {}) { perform("正在保存配置…", operation: { try self.files.save(game) }) { _ in complete() } }
-    func start(_ game: Game, slot: Int? = nil) { guard player == nil else { return }; player = PlayerSession(store: self, game: game, restoreSlot: slot) }
+    func start(_ game: Game, slot: Int? = nil) {
+        guard player == nil else { return }
+        let session = PlayerSession(store: self, game: game, restoreSlot: slot)
+        player = session; session.begin()
+    }
     func importGames(_ urls: [URL], name: String? = nil) {
         let platform = platform
         perform("正在导入游戏…", operation: {

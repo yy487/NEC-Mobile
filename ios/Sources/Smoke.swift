@@ -121,7 +121,8 @@ enum IOSSmoke {
             }
             try atomicJSON(["status": "passed", "checks": results.joined(separator: "\n")], to: documents.appendingPathComponent("ios-smoke.json"))
         } catch {
-            NECBridge.stop(); try? atomicJSON(["status": "failed", "error": error.localizedDescription, "checks": results.joined(separator: "\n")], to: documents.appendingPathComponent("ios-smoke.json"))
+            let details = "core=\(NECBridge.startupState()) / \(NECBridge.statusText()) / player=\(store.player?.message ?? "none") / ready=\(store.player?.ready ?? false)"
+            NECBridge.stop(); try? atomicJSON(["status": "failed", "error": error.localizedDescription, "details": details, "checks": results.joined(separator: "\n")], to: documents.appendingPathComponent("ios-smoke.json"))
         }
     }
 }

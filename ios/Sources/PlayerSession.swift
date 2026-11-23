@@ -80,6 +80,7 @@ final class PlayerSession: ObservableObject, Identifiable {
             do {
                 let configured = try slot.map { try self.store.files.restored(original, slot: $0) } ?? original
                 try self.store.files.prepare(configured)
+                DispatchQueue.main.async { self.message = "正在启动游戏…" }
                 let first = configured.hardDisk ?? configured.floppyA
                 let result = NECBridge.start(configured.platform, directory: self.store.files.directory(configured).path,
                     first: try self.store.files.path(configured, first), second: try self.store.files.path(configured, configured.floppyB),
@@ -88,7 +89,7 @@ final class PlayerSession: ObservableObject, Identifiable {
                 let deadline = ProcessInfo.processInfo.systemUptime + 45
                 while NECBridge.startupState() == 1 && ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.02) }
                 guard NECBridge.startupState() == 2 else { throw NECError(message: NECBridge.startupError().isEmpty ? "内核启动超时" : NECBridge.startupError()) }
-                if let slot = slot { try StateStore(self.store.files.directory(configured)).load(slot) }
+                if let slot = slot { DispatchQueue.main.async { self.message = "正在恢复上次进度…" }; try StateStore(self.store.files.directory(configured)).load(slot) }
                 try self.store.files.update(original.id, platform: original.platform) { $0.played = Date(); $0.lastMachineInfo = NECBridge.machineInfo() }
                 DispatchQueue.main.async { self.game = configured; self.machineInfo = NECBridge.machineInfo(); self.busy = false; self.ready = true; self.message = ""; self.applyPause() }
             } catch {
