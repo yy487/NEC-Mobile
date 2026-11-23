@@ -47,13 +47,20 @@ struct DocumentPicker: UIViewControllerRepresentable {
 
 struct RootView: View {
     @ObservedObject var store: LibraryStore
-    @State private var add = false, picker = false
+    @State private var add = false
+    @State private var picker = false
     @State private var purpose = ImportPurpose.games
     @State private var types: [UTType] = [.data]
     @State private var multiple = true
-    @State private var query88 = "", query98 = "", filter88 = 0, filter98 = 0
+    @State private var query88 = ""
+    @State private var query98 = ""
+    @State private var filter88 = 0
+    @State private var filter98 = 0
     @State private var resume: Game?
     @State private var tab = 0
+    @State private var pendingImages: [URL] = []
+    @State private var importName = ""
+    @State private var naming = false
     private func choose(_ purpose: ImportPurpose, types: [UTType], multiple: Bool = false) { self.purpose = purpose; self.types = types; self.multiple = multiple; picker = true }
     var body: some View {
         TabView(selection: $tab) {
@@ -73,7 +80,7 @@ struct RootView: View {
                     }.padding(20)
                 }.background(necBackground).navigationTitle("NEC Mobile").navigationBarTitleDisplayMode(.inline)
                     .toolbar { Button { add = true } label: { Label("添加游戏", systemImage: "plus") }.disabled(store.busy) }
-            }.navigationViewStyle(.stack).tabItem { Label("游戏库", systemImage: "books.vertical") }.tag(0)
+            }.navigationViewStyle(.stack).id(store.platform).tabItem { Label("游戏库", systemImage: "books.vertical") }.tag(0)
             NavigationView { UpdatesView() }.navigationViewStyle(.stack).tabItem { Label("最近更新", systemImage: "book") }.tag(1)
             NavigationView { PlatformSettingsView(store: store, choose: choose) }.navigationViewStyle(.stack).tabItem { Label("设置", systemImage: "gearshape") }.tag(2)
         }
@@ -85,6 +92,14 @@ struct RootView: View {
             if store.platform == 98 { Button("DOS 游戏目录") { choose(.dos, types: [.folder]) }; Button("DOS 游戏 ZIP") { choose(.dos, types: [.zip]) } }
         }
         .sheet(isPresented: $picker) { DocumentPicker(types: types, multiple: multiple) { urls in picker = false; receive(urls) } }
+        .sheet(isPresented: $naming) {
+            NavigationView { Form {
+                Text("已选择 \(pendingImages.count) 个文件").foregroundColor(.secondary)
+                TextField("游戏名称", text: $importName)
+                Button("添加到游戏库") { naming = false; store.importGames(pendingImages, name: importName); if store.platform == 88 { query88 = ""; filter88 = 0 } else { query98 = ""; filter98 = 0 } }
+                    .disabled(importName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || importName.count > 80)
+            }.navigationTitle("添加游戏").toolbar { Button("取消") { naming = false; pendingImages = [] } } }
+        }
         .sheet(item: $store.dosDraft) { DOSWizard(store: store, draft: $0) }
         .fullScreenCover(item: $store.player) { PlayerView(session: $0) }
         .alert("操作未完成", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("知道了") { store.error = nil } } message: { Text(store.error ?? "") }
@@ -129,7 +144,9 @@ struct RootView: View {
     private func receive(_ urls: [URL]) {
         let purpose = purpose, platform = store.platform
         switch purpose {
-        case .games: store.importGames(urls)
+        case .games:
+            pendingImages = urls; importName = urls.first?.deletingPathExtension().lastPathComponent ?? ""
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { naming = !urls.isEmpty }
         case .dos:
             guard let first = urls.first else { return }; store.perform("正在准备 DOS 目录…", operation: { let scoped = first.startAccessingSecurityScopedResource(); defer { if scoped { first.stopAccessingSecurityScopedResource() } }; return try store.files.stageDOS(first) }) { store.dosDraft = $0 }
         default:
@@ -138,11 +155,12 @@ struct RootView: View {
                     let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     switch purpose {
                     case .resource(let game):
+                        let effectivePlatform = game?.platform ?? platform
                         if url.pathExtension.lowercased() == "zip" {
                             let temporary = store.files.root.appendingPathComponent("resource-import-" + UUID().uuidString); defer { try? fileManager.removeItem(at: temporary) }
                             try checked(NECBridge.extractZip(url.path, target: temporary.path))
-                            for file in try store.files.files(temporary) where ["rom", "fnt", "bmp", "bin", "wav", "sys", "exe"].contains(file.pathExtension.lowercased()) { try store.files.importResource(file, platform: platform, game: game) }
-                        } else { try store.files.importResource(url, platform: platform, game: game) }
+                            for file in try store.files.files(temporary) where ["rom", "fnt", "bmp", "bin", "wav", "sys", "exe"].contains(file.pathExtension.lowercased()) { try store.files.importResource(file, platform: effectivePlatform, game: game) }
+                        } else { try store.files.importResource(url, platform: effectivePlatform, game: game) }
                     case .soundfont: try store.files.importSoundFont(url)
                     case .template: try store.files.importTemplate(url)
                     default: break

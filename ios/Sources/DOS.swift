@@ -3,13 +3,12 @@ import Foundation
 extension LibraryFiles {
     func dosComponent(_ component: String) throws {
         let fields = component.split(separator: ".", omittingEmptySubsequences: false)
+        let invalid = NECError(message: "DOS 名称需符合代码页 932 的 8.3 规则：\(component)")
         guard !component.isEmpty, component != ".", component != "..", fields.count <= 2,
               !component.unicodeScalars.contains(where: { $0.value <= 32 || "\"*+,/:;<=>?[\\]|&%()!^".unicodeScalars.contains($0) }),
-              (try oem(String(fields[0]))).count <= 8, !fields[0].isEmpty,
-              fields.count == 1 || (!(fields[1].isEmpty) && (try oem(String(fields[1]))).count <= 3),
-              component.range(of: #"(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)"#, options: .regularExpression) == nil else {
-            throw NECError(message: "DOS 名称需符合代码页 932 的 8.3 规则：\(component)")
-        }
+              component.range(of: #"(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)"#, options: .regularExpression) == nil else { throw invalid }
+        let stem = try oem(String(fields[0])), ext = try oem(fields.count > 1 ? String(fields[1]) : "")
+        guard !stem.isEmpty, stem.count <= 8, fields.count == 1 || (!ext.isEmpty && ext.count <= 3) else { throw invalid }
     }
     func templates() throws -> [DosTemplate] {
         let builtin = try asset("boot/freedos-v2.hdi")

@@ -180,7 +180,12 @@ struct DOSWizard: View {
     @ObservedObject var store: LibraryStore
     let draft: DosDraft
     @State private var templates: [DosTemplate] = []
-    @State private var templateID = "builtin", entry = "", working = "", drive = "C:", initialization = "", name = ""
+    @State private var templateID = "builtin"
+    @State private var entry = ""
+    @State private var working = ""
+    @State private var drive = "C:"
+    @State private var initialization = ""
+    @State private var name = ""
     @Environment(\.presentationMode) private var presentation
     private var selected: DosTemplate? { templates.first { $0.id == templateID } ?? templates.first }
     var body: some View {

@@ -95,6 +95,7 @@ final class LibraryFiles {
                     try fileManager.copyItem(at: source, to: target); try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
                     game.media.append(DiskImage(file: name, name: source.lastPathComponent, titles: try Binary.titles(target, platform: platform)))
                 } else if ["rom", "fnt", "bmp", "wav", "bin"].contains(ext) {
+                    guard size <= 16 * 1024 * 1024 else { throw NECError(message: "单个固件、字库或 WAV 资源超过 16 MB") }
                     let name = source.lastPathComponent.lowercased(); guard !name.contains("\n"), name.utf8.count <= 96 else { throw NECError(message: "资源名称无效") }
                     let folder = destination.appendingPathComponent("firmware-sources/game"); try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
                     let target = folder.appendingPathComponent(name); guard !fileManager.fileExists(atPath: target.path) else { throw NECError(message: "游戏包有重名资源 \(name)") }
@@ -191,7 +192,7 @@ final class LibraryFiles {
     }
     func importResource(_ source: URL, platform: Int, game: Game? = nil) throws {
         let name = source.lastPathComponent.lowercased(), ext = source.pathExtension.lowercased()
-        guard ["rom", "fnt", "bmp", "wav", "bin", "sys", "exe"].contains(ext), byteSize(source) <= 16 * 1024 * 1024 else { throw NECError(message: "请选择 ROM、字库、节奏 WAV 或 DOS 驱动资源") }
+        guard ["rom", "fnt", "bmp", "wav", "bin", "sys", "exe"].contains(ext), byteSize(source) > 0, byteSize(source) <= 16 * 1024 * 1024 else { throw NECError(message: "请选择有效的 ROM、字库、节奏 WAV 或 DOS 驱动资源，最大 16 MB") }
         if name.hasPrefix("sound") && ext == "rom" && byteSize(source) != 0x4000 { throw NECError(message: "声卡 BIOS ROM 需为 16 KB") }
         if platform == 98 && name.hasSuffix(".bmp") { try validateFont(source) }
         let folder = game.map { directory($0).appendingPathComponent("firmware-sources/game") } ?? platformRoot(platform).appendingPathComponent(["sys", "exe"].contains(ext) ? "drivers" : "resources")
@@ -245,7 +246,11 @@ final class LibraryStore: ObservableObject {
             for url in urls where url.startAccessingSecurityScopedResource() { scoped.append(url) }
             if urls.count == 1, let first = urls.first {
                 let directory = try first.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
-                if first.pathExtension.lowercased() == "zip" || directory { return try self.files.importContainer(first, platform: platform) }
+                if first.pathExtension.lowercased() == "zip" || directory {
+                    var game = try self.files.importContainer(first, platform: platform)
+                    if let name = name { let value = name.trimmingCharacters(in: .whitespacesAndNewlines); guard !value.isEmpty, value.count <= 80 else { throw NECError(message: "游戏名称需为 1–80 个字符") }; game.name = value; try self.files.save(game) }
+                    return game
+                }
             }
             return try self.files.importImages(urls, platform: platform, title: name)
         }) { _ in self.progress = "已添加到游戏库" }
