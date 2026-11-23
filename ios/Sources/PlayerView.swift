@@ -24,6 +24,7 @@ struct PlayerView: View {
     @State private var reset = false
     @State private var position = CGPoint(x: 1, y: 0.9)
     @State private var drag = CGSize.zero
+    @State private var dragOrigin: CGPoint?
     @State private var landscape = false
     var body: some View {
         GeometryReader { geometry in
@@ -47,6 +48,7 @@ struct PlayerView: View {
             Button("知道了", role: .cancel) { session.error = nil }
         } message: { Text(session.error ?? "") }
         .onDisappear { session.cancelTouches?(); OrientationDelegate.apply("AUTO"); if !session.closing { session.stop() } }
+        .onReceive(session.store.$error) { value in if let value = value { session.error = value; session.store.error = nil } }
     }
     @ViewBuilder private func panelView(_ panel: PlayerPanel) -> some View {
         switch panel {
@@ -89,8 +91,10 @@ struct PlayerView: View {
         let width = geometry.size.width, height = geometry.size.height, expanded = session.toolsExpanded
         let diameter = min(272.0, min(width - geometry.safeAreaInsets.leading - geometry.safeAreaInsets.trailing, height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom) - 16)
         let radius = expanded ? diameter / 2 : 24
-        let centerX = max(radius + 8 + geometry.safeAreaInsets.leading, min(width - radius - 8 - geometry.safeAreaInsets.trailing, (position.x < 0.5 ? 32 + geometry.safeAreaInsets.leading : width - 32 - geometry.safeAreaInsets.trailing) + drag.width))
-        let centerY = max(radius + 8 + geometry.safeAreaInsets.top, min(height - radius - 8 - geometry.safeAreaInsets.bottom, geometry.safeAreaInsets.top + 32 + position.y * max(1, height - 64 - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom) + drag.height))
+        let baseX = dragOrigin?.x ?? (position.x < 0.5 ? 32 + geometry.safeAreaInsets.leading : width - 32 - geometry.safeAreaInsets.trailing)
+        let baseY = dragOrigin?.y ?? (geometry.safeAreaInsets.top + 32 + position.y * max(1, height - 64 - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom))
+        let centerX = max(radius + 8 + geometry.safeAreaInsets.leading, min(width - radius - 8 - geometry.safeAreaInsets.trailing, baseX + drag.width))
+        let centerY = max(radius + 8 + geometry.safeAreaInsets.top, min(height - radius - 8 - geometry.safeAreaInsets.bottom, baseY + drag.height))
         return ZStack {
             if expanded {
                 Circle().fill(necBackground.opacity(0.94)).frame(width: diameter, height: diameter)
@@ -101,8 +105,9 @@ struct PlayerView: View {
             }
             Button { session.toolsExpanded.toggle() } label: { Text(expanded ? "×" : "≡").font(.system(size: expanded ? 30 : 24, weight: .bold)).frame(width: expanded ? 68 : 48, height: expanded ? 68 : 48).background(necSurface.opacity(expanded ? 0.95 : 0.6)).clipShape(Circle()) }
                 .accessibilityLabel(expanded ? "收起工具栏" : "展开工具栏")
-                .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { value in session.toolsExpanded = false; drag = value.translation }.onEnded { value in
-                    position.x = centerX + value.translation.width < width / 2 ? 0 : 1; position.y = max(0, min(1, (centerY + value.translation.height - geometry.safeAreaInsets.top - 32) / max(1, height - 64 - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom))); drag = .zero
+                .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { value in if dragOrigin == nil { dragOrigin = CGPoint(x: centerX, y: centerY) }; session.toolsExpanded = false; drag = value.translation }.onEnded { value in
+                    let origin = dragOrigin ?? CGPoint(x: centerX, y: centerY)
+                    position.x = origin.x + value.translation.width < width / 2 ? 0 : 1; position.y = max(0, min(1, (origin.y + value.translation.height - geometry.safeAreaInsets.top - 32) / max(1, height - 64 - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom))); drag = .zero; dragOrigin = nil
                     let key = landscape ? "wheel.landscape" : "wheel.portrait"; UserDefaults.standard.set(Double(position.x), forKey: key + ".x"); UserDefaults.standard.set(Double(position.y), forKey: key + ".y")
                 })
         }.frame(width: diameter, height: diameter).position(x: centerX, y: centerY).foregroundColor(.white).disabled(session.busy || session.closing)

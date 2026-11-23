@@ -201,5 +201,6 @@ struct DOSWizard: View {
         }.navigationTitle("DOS 目录导入").toolbar { Button("取消") { if !store.busy { store.queue.async { try? fileManager.removeItem(at: draft.directory) }; store.dosDraft = nil; presentation.wrappedValue.dismiss() } }.disabled(store.busy) } }
             .onAppear { name = draft.name; entry = draft.programs.first ?? ""; working = (entry as NSString).deletingLastPathComponent; store.queue.async { let result = (try? store.files.templates()) ?? []; DispatchQueue.main.async { templates = result; drive = selected?.drive ?? "C:"; initialization = selected?.autoexec ?? "" } } }
             .interactiveDismissDisabled(store.busy)
+            .alert("导入未完成", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("知道了") { store.error = nil } } message: { Text(store.error ?? "") }
     }
 }

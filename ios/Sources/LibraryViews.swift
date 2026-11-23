@@ -102,7 +102,7 @@ struct RootView: View {
         }
         .sheet(item: $store.dosDraft) { DOSWizard(store: store, draft: $0) }
         .fullScreenCover(item: $store.player) { PlayerView(session: $0) }
-        .alert("操作未完成", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) { Button("知道了") { store.error = nil } } message: { Text(store.error ?? "") }
+        .alert("操作未完成", isPresented: Binding(get: { store.error != nil && store.dosDraft == nil && store.player == nil && !picker && !naming }, set: { if !$0 { store.error = nil } })) { Button("知道了") { store.error = nil } } message: { Text(store.error ?? "") }
         .confirmationDialog("继续上次游戏？", isPresented: Binding(get: { resume != nil }, set: { if !$0 { resume = nil } }), titleVisibility: .visible) {
             if let game = resume { Button("继续游戏") { resume = nil; store.start(game, slot: 0) }; Button("重新启动") { resume = nil; store.start(game) } }
         }

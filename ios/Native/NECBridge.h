@@ -32,6 +32,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSData *)dosAutoexec:(NSString *)path;
 + (NSString *)buildDos:(NSString *)source target:(NSString *)target files:(NSArray<NSDictionary *> *)files startup:(NSData *)startup autoexec:(NSData *)autoexec;
 + (NSString *)prepareFloppy:(NSString *)source target:(NSString *)target files:(NSArray<NSDictionary *> *)files autoexec:(nullable NSData *)autoexec config:(nullable NSData *)config label:(nullable NSData *)label;
+@end
+@interface NECBridge (Archive)
 + (NSString *)gzip:(NSString *)source target:(NSString *)target;
 + (NSString *)gunzip:(NSString *)source target:(NSString *)target;
 + (NSString *)extractZip:(NSString *)source target:(NSString *)target;
