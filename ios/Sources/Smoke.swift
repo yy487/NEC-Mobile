@@ -35,9 +35,11 @@ enum IOSSmoke {
                     }
                     let source = documents.appendingPathComponent("dos-demo")
                     try fileManager.createDirectory(at: source, withIntermediateDirectories: true)
-                    try Data("@ECHO OFF\r\nECHO NEC Mobile iOS DOS import\r\nECHO PASS>\\IOSBOOT.TXT\r\nPAUSE\r\n".utf8).write(to: source.appendingPathComponent("開始.BAT"))
+                    let script = Data("@ECHO OFF\r\nECHO NEC Mobile iOS DOS import\r\nECHO PASS>\\IOSBOOT.TXT\r\nPAUSE\r\n".utf8)
+                    try script.write(to: source.appendingPathComponent("START.BAT"))
+                    try script.write(to: source.appendingPathComponent("開始.BAT"))
                     let draft = try store.files.stageDOS(source), template = try store.files.templates()[0]
-                    var imported = try store.files.commitDOS(draft, template: template, entry: "開始.BAT", working: "", drive: template.drive, initialization: template.autoexec)
+                    var imported = try store.files.commitDOS(draft, template: template, entry: "START.BAT", working: "", drive: template.drive, initialization: template.autoexec)
                     let programs = store.files.diskInfo(store.files.mediaURL(imported, imported.media[0]))["programs"] as? [String] ?? []
                     guard programs.contains("NECGAME/開始.BAT") else { throw NECError(message: "DOS 日文入口解码失败") }
                     imported.options["np2kai_FastMC"] = "ON"
@@ -65,7 +67,7 @@ enum IOSSmoke {
                 if platform == 98 {
                     let entries = try await files(store) { store.files.diskInfo(store.files.mediaURL(game, game.media[0]))["entries"] as? [[String: Any]] ?? [] }
                     guard entries.contains(where: { $0["name"] as? String == "IOSBOOT.TXT" }) else { throw NECError(message: "DOS 启动脚本未执行，请查看 PC-98 画面") }
-                    results.append("PC-98: Japanese DOS startup script executed and wrote IOSBOOT.TXT")
+                    results.append("PC-98: DOS startup executed and wrote IOSBOOT.TXT; Japanese file names preserved and decoded")
                 }
                 session.userPaused = false
                 session.state(7, load: true)

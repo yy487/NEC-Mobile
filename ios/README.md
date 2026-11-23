@@ -29,6 +29,8 @@ GitHub Actions 的 **iOS build** 工作流使用 macOS 和 Xcode。`main` 与 `i
 
 PC-98 提供内置 FreeDOS(98) 软盘、硬盘模板和空白存档盘。自备 DOS 系统 HDI / FDI 可从设置导入。XMS / EMS 配置使用匹配的自备 DOS 内存驱动。
 
+内置 FreeCOM 无法执行部分日文名 BAT 文件。此类游戏请选择英文名启动脚本，或导入兼容的 DOS 系统模板；磁盘中的原文件名与数据会保留。
+
 ROM、字库和 OPNA 节奏 WAV 可全局或按游戏导入。FREECG98.BMP 使用 2048×2048、1 位未压缩 BMP。MIDI 使用 SF2 音色库。
 
 运行时通过环形工具球使用 Esc、Enter、空格、快存、快读、键盘与菜单。支持滑动方向持续按住、鼠标触控板、实体键盘、换盘和退盘。
