@@ -44,3 +44,17 @@ set_target_properties(NECMobile PROPERTIES
     XCODE_EMBED_FRAMEWORKS_CODE_SIGN_ON_COPY FALSE)
 add_custom_command(TARGET NECMobile POST_BUILD
     COMMAND ${Python3_EXECUTABLE} ${REPO}/scripts/prepare_ios_assets.py --app "$<TARGET_BUNDLE_DIR:NECMobile>")
+if(NEC_SDK STREQUAL "iphonesimulator")
+    find_package(XCTest REQUIRED)
+    xctest_add_bundle(NECMobileImportUITests NECMobile Tests/ImportUITests.swift)
+    set_target_properties(NECMobileImportUITests PROPERTIES
+        XCODE_PRODUCT_TYPE com.apple.product-type.bundle.ui-testing
+        XCODE_ATTRIBUTE_TEST_HOST ""
+        XCODE_ATTRIBUTE_BUNDLE_LOADER ""
+        XCODE_ATTRIBUTE_TEST_TARGET_NAME NECMobile
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.necmobile.ios.import-tests
+        XCODE_ATTRIBUTE_GENERATE_INFOPLIST_FILE YES
+        XCODE_ATTRIBUTE_SWIFT_VERSION 5.0)
+    set_target_properties(NECMobile PROPERTIES XCODE_GENERATE_SCHEME TRUE
+        XCODE_SCHEME_TEST_CONFIGURATION Release)
+endif()

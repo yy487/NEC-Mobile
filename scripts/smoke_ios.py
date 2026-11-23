@@ -17,6 +17,19 @@ try:
     subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True)
     app = ROOT / 'work/ios-simulator/Release-iphonesimulator/NECMobile.app'
     run('xcrun', 'simctl', 'install', device, str(app))
+    result_bundle = ROOT / 'work/ios-import-ui.xcresult'
+    with (ROOT / 'work/ios-import-ui.log').open('w', encoding='utf-8') as log:
+        check = subprocess.run(['xcodebuild', 'test', '-project', str(ROOT / 'work/ios-simulator/NECMobileApple.xcodeproj'),
+            '-scheme', 'NECMobile', '-configuration', 'Release', '-destination', 'id=' + device,
+            '-resultBundlePath', str(result_bundle), '-only-testing:NECMobileImportUITests', 'CODE_SIGNING_ALLOWED=NO'],
+            stdout=log, stderr=subprocess.STDOUT)
+    if result_bundle.exists():
+        subprocess.run(['xcrun', 'xcresulttool', 'export', 'attachments', '--path', str(result_bundle),
+                        '--output-path', str(ROOT / 'work/ios-import-ui')], check=False)
+    if check.returncode:
+        print((ROOT / 'work/ios-import-ui.log').read_text(encoding='utf-8')[-14000:])
+        raise SystemExit('Add-game UI check failed; see ios-import-ui.log.')
+    print('Add game button, import menu and document picker passed')
     data = Path(run('xcrun', 'simctl', 'get_app_container', device, 'org.necmobile.ios', 'data'))
     (data / 'Documents').mkdir(exist_ok=True)
     fixture = data / 'Documents/ios-import.zip'

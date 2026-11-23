@@ -16,7 +16,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
     var types: [UTType]; var multiple: Bool; var complete: ([URL]) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(complete) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false); picker.allowsMultipleSelection = multiple; picker.delegate = context.coordinator; return picker
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false); picker.allowsMultipleSelection = multiple; picker.delegate = context.coordinator; picker.view.accessibilityIdentifier = "library.documentPicker"; return picker
     }
     func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
@@ -47,7 +47,6 @@ struct DocumentPicker: UIViewControllerRepresentable {
 
 struct RootView: View {
     @ObservedObject var store: LibraryStore
-    @State private var add = false
     @State private var picker = false
     @State private var purpose = ImportPurpose.games
     @State private var types: [UTType] = [.data]
@@ -79,18 +78,20 @@ struct RootView: View {
                         if visible.isEmpty { Text(store.games.isEmpty ? "添加镜像、游戏文件夹或 ZIP 以建立游戏库" : "没有符合条件的游戏").foregroundColor(.secondary).frame(maxWidth: .infinity).padding() }
                     }.padding(20)
                 }.background(necBackground).navigationTitle("NEC Mobile").navigationBarTitleDisplayMode(.inline)
-                    .toolbar { Button { add = true } label: { Label("添加游戏", systemImage: "plus") }.disabled(store.busy) }
+                    .toolbar {
+                        Menu {
+                            Button("选择多张磁盘镜像") { choose(.games, types: [.data], multiple: true) }.accessibilityIdentifier("library.importImages")
+                            Button("游戏文件夹") { choose(.games, types: [.folder]) }
+                            Button("游戏 ZIP") { choose(.games, types: [.zip]) }
+                            if store.platform == 98 { Button("DOS 游戏目录") { choose(.dos, types: [.folder]) }; Button("DOS 游戏 ZIP") { choose(.dos, types: [.zip]) } }
+                        } label: { Label("添加游戏", systemImage: "plus") }
+                            .accessibilityIdentifier("library.addGame").disabled(store.busy)
+                    }
             }.navigationViewStyle(.stack).id(store.platform).tabItem { Label("游戏库", systemImage: "books.vertical") }.tag(0)
             NavigationView { UpdatesView() }.navigationViewStyle(.stack).tabItem { Label("最近更新", systemImage: "book") }.tag(1)
             NavigationView { PlatformSettingsView(store: store, choose: choose) }.navigationViewStyle(.stack).tabItem { Label("设置", systemImage: "gearshape") }.tag(2)
         }
         .disabled(store.busy && store.player == nil)
-        .confirmationDialog("添加游戏", isPresented: $add, titleVisibility: .visible) {
-            Button("选择多张磁盘镜像") { choose(.games, types: [.data], multiple: true) }
-            Button("游戏文件夹") { choose(.games, types: [.folder]) }
-            Button("游戏 ZIP") { choose(.games, types: [.zip]) }
-            if store.platform == 98 { Button("DOS 游戏目录") { choose(.dos, types: [.folder]) }; Button("DOS 游戏 ZIP") { choose(.dos, types: [.zip]) } }
-        }
         .sheet(isPresented: $picker) { DocumentPicker(types: types, multiple: multiple) { urls in picker = false; receive(urls) } }
         .sheet(isPresented: $naming) {
             NavigationView { Form {
