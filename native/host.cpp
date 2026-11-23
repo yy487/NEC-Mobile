@@ -305,6 +305,9 @@ void run(int platform, std::string directory, std::string disk, std::string seco
         SnapshotMeta target;
         MidiSynth checkMidi;
         if (!target.read(folder+"/host.bin") || !checkMidi.load(folder+"/midi.bin") || !core->checkState((folder+"/machine.bin").c_str())) return "State is incomplete or incompatible";
+#if defined(__APPLE__)
+        if (!target.relocate(directory)) return "State belongs to a different game";
+#endif
         if (target.platform!=current.platform || target.mode!=current.mode || target.directory!=directory || stateHardwareConfig(target.config)!=stateHardwareConfig(current.config)) return "State machine settings do not match; restore the saved settings first";
         for (const auto& path:target.media) if (!path.empty() && access(path.c_str(),R_OK)) return "State disk is missing";
         if (!hardDiskPath.empty() && access(hardDiskPath.c_str(),R_OK)) return "State disk is missing";

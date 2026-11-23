@@ -2,13 +2,16 @@ name: iOS build
 on:
   workflow_dispatch:
   push:
-    branches: [ios-port]
+    branches: [main, ios-port]
     paths:
       - '.github/workflows/ios.yml'
       - 'ios/**'
       - 'native/**'
-      - 'scripts/*ios*.py'
+      - 'scripts/**'
       - 'third_party/**'
+      - 'app/src/main/assets/**'
+      - 'CHANGELOG.md'
+      - 'version.properties'
       - 'app/src/main/java/org/necmobile/MachineOptions.java'
       - 'app/src/main/java/org/necmobile/InputPresets.java'
 permissions:

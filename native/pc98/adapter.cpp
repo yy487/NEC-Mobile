@@ -1,5 +1,6 @@
 #include "../core_api.h"
 #include "../machine_config.h"
+#include "../snapshot_meta.h"
 #include "libretro.h"
 #include <dlfcn.h>
 #include <unistd.h>
@@ -354,6 +355,14 @@ static const char* diskPath(int drive) { return floppyPath && drive >= 0 && driv
 static bool saveState(const char* path) { return saveMachine && saveMachine(path); }
 static bool checkState(const char* path) { return checkMachine && checkMachine(path); }
 static bool loadState(const char* path) {
+#if defined(__APPLE__)
+    // iOS can move the data container when an app is updated or restored.
+    SnapshotMeta metadata;
+    std::string statePath(path);
+    auto relocate = reinterpret_cast<void (*)(const char*, const char*)>(dlsym(library, "necmobile_state_paths"));
+    if (!relocate || !metadata.read(statePath.substr(0, statePath.find_last_of('/')) + "/host.bin")) return false;
+    relocate(metadata.directory.c_str(), saveDirectory.c_str());
+#endif
     if (!loadMachine || !loadMachine(path)) return false;
     keys.fill(false); mouseX=mouseY=polledX=polledY=0; mouseButtons=0;
     variablesChanged = true;

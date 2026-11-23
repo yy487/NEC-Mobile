@@ -2,11 +2,12 @@
 
 **简体中文** | [English](README.en.md) | [日本語](README.ja.md)
 
-在 Android 上运行 PC-88 和 PC-98 游戏。项目将 M88 的 PC-88 内核与 NP2kai 的 PC-98 内核集成到同一个应用，分别管理两种平台的游戏、资源和机器配置。
+在 Android、iPhone 和 iPad 上运行 PC-88 和 PC-98 游戏。项目将 M88 的 PC-88 内核与 NP2kai 的 PC-98 内核集成到同一个应用，分别管理两种平台的游戏、资源和机器配置。
 
-当前版本 **0.26.9**，适用于 **Android 8.0 及以上、ARM64** 设备。
+当前版本 **0.26.9**。Android 版适用于 **Android 8.0 及以上的 ARM64 设备**；Apple 版适用于 **iOS / iPadOS 15 及以上的 ARM64 设备**。
 
 - Android 安装包 `NEC-Mobile-0.26.9-arm64.apk`
+- iPhone / iPad 安装包 `NEC-Mobile-iOS-unsigned.ipa`，个人签名后安装
 - 源码包 `NEC-Mobile-0.26.9-sources.zip`
 
 ## 功能
@@ -17,12 +18,18 @@
 - 按游戏保存机型、CPU、内存、声卡及分项音量。
 - 每款游戏 6 个手动即时存档槽，另有独立的快速槽和自动会话槽。
 - SF2 MIDI 合成，以及前后台和音频设备切换后的声音恢复。
-- Compose / Material 3 深绿界面、PC-98 / PC-88 顶部切换、最近启动卡片、游戏管理页与启动盘位弹层。
+- 原生深绿界面：Android 使用 Compose / Material 3，iOS 使用 SwiftUI，提供 PC-98 / PC-88 切换、最近启动卡片与游戏管理页。
 - 底部“最近更新”展示本版和历史更新日志，构建时自动同步项目 CHANGELOG。
 - 独立自动会话槽、运行速度、画面比例、手机采样率与缓冲设置。
 - PC-98 DOS 目录导入为专用 HDI，支持 FREECG98.BMP 字库。
 
-## 开始使用
+## iPhone / iPad
+
+[Apple 版使用与构建说明](ios/README.md)。GitHub Actions 使用 macOS 和 Xcode 构建设备 IPA 与模拟器 App，Windows 用户可下载 IPA，通过 Sideloadly 使用自己的 Apple ID 签名安装。免费个人签名通常需要每 7 天续签。
+
+Apple 版使用 Metal 显示与 AVAudioEngine 音频输出，复用两个模拟内核和公共运行逻辑。游戏与存档保存在应用 Documents/NECMobile，可通过系统“文件”App 或电脑文件共享访问。下文的 Android 入口与 Apple 版基本对应。
+
+## Android 开始使用
 
 1. 安装 APK，在顶部切换 **PC-88** 或 **PC-98**，应用会记住上次使用的平台。
 2. 应用会自动准备默认启动固件和字库。游戏如需其他固件，可从 **设置 → 系统 ROM / 字库** 导入，也可与磁盘放在同一游戏文件夹或 ZIP 中。

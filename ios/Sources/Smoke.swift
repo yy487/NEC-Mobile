@@ -1,6 +1,11 @@
 import Foundation
 
 enum IOSSmoke {
+    private static var started = false
+    @MainActor static func start(_ store: LibraryStore) {
+        guard !started else { return }; started = true
+        Task { await run(store) }
+    }
     @MainActor static func wait(_ label: String, _ predicate: () -> Bool) async throws {
         let deadline = ProcessInfo.processInfo.systemUptime + 45
         while !predicate() {
@@ -79,7 +84,28 @@ enum IOSSmoke {
                 try await capture("pc\(platform)-states", documents: documents)
                 reopened.panel = nil; reopened.stop()
                 try await wait("结束会话") { store.player == nil || reopened.error != nil }; try checked(reopened.error ?? "")
+                try await Task.sleep(nanoseconds: 800_000_000)
+                try await files(store) {
+                    let original = store.files.directory(game)
+                    let moved = documents.appendingPathComponent("Relocated/NECMobile/pc\(platform)/games/\(game.id)")
+                    try fileManager.createDirectory(at: moved.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try fileManager.moveItem(at: original, to: moved)
+                    defer { NECBridge.stop(); try? fileManager.moveItem(at: moved, to: original) }
+                    let configuration = moved.appendingPathComponent("machine.cfg")
+                    let text = try String(contentsOf: configuration, encoding: .utf8).replacingOccurrences(of: original.path, with: moved.path)
+                    try Data(text.utf8).write(to: configuration, options: .atomic)
+                    func path(_ ref: DiskRef?) -> String { ref.map { moved.appendingPathComponent("media/\($0.file)").path } ?? "" }
+                    let first = saved.hardDisk ?? saved.floppyA
+                    try checked(NECBridge.start(platform, directory: moved.path, first: path(first), second: path(saved.floppyB), mode: saved.mode, firstIndex: first?.index ?? 0, secondIndex: saved.floppyB?.index ?? 0))
+                    let deadline = ProcessInfo.processInfo.systemUptime + 45
+                    while NECBridge.startupState() == 1 && ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.05) }
+                    guard NECBridge.startupState() == 2 else { throw NECError(message: "目录移动后启动失败：" + NECBridge.startupError()) }
+                    try StateStore(moved).load(0)
+                    guard NECBridge.disk(0) == path(saved.floppyA) else { throw NECError(message: "目录移动后存档磁盘路径错误") }
+                    NECBridge.pause(false); Thread.sleep(forTimeInterval: 0.3)
+                }
                 results.append("PC-\(platform): import, rendered UI, quick/manual state, eject/mount, background save, playtime and resume passed")
+                results.append("PC-\(platform): saved session restored after moving the data directory")
             }
             try atomicJSON(["status": "passed", "checks": results.joined(separator: "\n")], to: documents.appendingPathComponent("ios-smoke.json"))
         } catch {

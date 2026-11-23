@@ -151,7 +151,10 @@ final class LibraryFiles {
         try fileManager.createDirectory(at: resources, withIntermediateDirectories: true)
         var candidates: [String: URL] = [:]
         for location in [Self.assets.appendingPathComponent("firmware/pc\(game.platform)"), platformRoot(game.platform).appendingPathComponent("resources"), folder.appendingPathComponent("firmware-sources/game")] {
-            for file in (try? fileManager.contentsOfDirectory(at: location, includingPropertiesForKeys: nil)) ?? [] { candidates[file.lastPathComponent.lowercased()] = file }
+            var sources: [String: URL] = [:]
+            for file in (try? fileManager.contentsOfDirectory(at: location, includingPropertiesForKeys: nil)) ?? [] { sources[file.lastPathComponent.lowercased()] = file }
+            if sources["2608_rim.wav"] == nil, let alias = sources["2608_rym.wav"] { sources["2608_rim.wav"] = alias }
+            candidates.merge(sources) { _, newer in newer }
         }
         for (name, source) in candidates where !(game.platform == 98 && ["font.bmp", "font.rom", "freecg98.bmp"].contains(name)) {
             let target = resources.appendingPathComponent(name); if fileManager.fileExists(atPath: target.path) { try fileManager.removeItem(at: target) }; try fileManager.copyItem(at: source, to: target)

@@ -2,11 +2,12 @@
 
 [简体中文](README.md) | **English** | [日本語](README.ja.md)
 
-Play PC-88 and PC-98 games on Android. NEC Mobile brings the M88 PC-88 core and the NP2kai PC-98 core into one app, with separate game libraries, resources, and machine settings for each platform.
+Play PC-88 and PC-98 games on Android, iPhone, and iPad. NEC Mobile brings the M88 PC-88 core and the NP2kai PC-98 core into one app, with separate game libraries, resources, and machine settings for each platform.
 
-Version **0.26.9**, for **ARM64 devices running Android 8.0 or later**.
+Version **0.26.9**. Android requires **Android 8.0 or later on ARM64**; the Apple app requires **iOS / iPadOS 15 or later on ARM64**.
 
 - Android APK `NEC-Mobile-0.26.9-arm64.apk`
+- iPhone / iPad package `NEC-Mobile-iOS-unsigned.ipa`, installed after personal signing
 - Source archive `NEC-Mobile-0.26.9-sources.zip`
 
 ## Features
@@ -17,12 +18,18 @@ Version **0.26.9**, for **ARM64 devices running Android 8.0 or later**.
 - Per-game machine, CPU, memory, sound board, and mixer settings.
 - Six manual save-state slots per game, plus separate quick-save and automatic session slots.
 - SF2 MIDI synthesis and audio recovery after backgrounding or output-device changes.
-- A dark-green Compose / Material 3 interface with platform switching, a recent-game card, game management, and launch-media sheets.
+- A native dark-green interface using Compose / Material 3 on Android and SwiftUI on iOS, with platform switching, a recent-game card, and game management.
 - The **最近更新** tab displays current and historical release notes, copied from CHANGELOG during the build.
 - An independent automatic session slot, speed and aspect controls, and phone audio settings.
 - Import PC-98 DOS folders into private HDI disks and select FREECG98.BMP fonts.
 
-## Getting started
+## iPhone / iPad
+
+See the [Apple setup and build guide](ios/README.md). GitHub Actions builds the device IPA and simulator app using macOS and Xcode. On Windows, download the IPA and sign it with your own Apple ID using Sideloadly. Free personal signing generally needs renewal every seven days.
+
+The Apple app uses Metal and AVAudioEngine, sharing both emulator cores and runtime logic with Android. Games and states are stored in Documents/NECMobile and are accessible through Files or computer file sharing. The Android instructions below have equivalent controls in the Apple app.
+
+## Getting started on Android
 
 Menu labels below match the app's Chinese interface.
 

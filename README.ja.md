@@ -2,11 +2,12 @@
 
 [简体中文](README.md) | [English](README.en.md) | **日本語**
 
-PC-88 と PC-98 のゲームを Android で遊ぶためのエミュレーターです。M88 の PC-88 コアと NP2kai の PC-98 コアを一つのアプリに組み込み、ゲームライブラリ、リソース、マシン設定をプラットフォームごとに管理します。
+PC-88 と PC-98 のゲームを Android、iPhone、iPad で遊ぶためのエミュレーターです。M88 の PC-88 コアと NP2kai の PC-98 コアを一つのアプリに組み込み、ゲームライブラリ、リソース、マシン設定をプラットフォームごとに管理します。
 
-現在のバージョンは **0.26.9**。**Android 8.0 以降の ARM64 端末**に対応しています。
+現在のバージョンは **0.26.9**。Android 版は **Android 8.0 以降の ARM64 端末**、Apple 版は **iOS / iPadOS 15 以降の ARM64 端末**に対応しています。
 
 - Android APK `NEC-Mobile-0.26.9-arm64.apk`
+- iPhone / iPad 用 `NEC-Mobile-iOS-unsigned.ipa`（個人署名後にインストール）
 - ソースコード一式 `NEC-Mobile-0.26.9-sources.zip`
 
 ## 主な機能
@@ -17,12 +18,18 @@ PC-88 と PC-98 のゲームを Android で遊ぶためのエミュレーター�
 - 機種、CPU、メモリー、サウンドボード、各音源の音量をゲームごとに保存。
 - 各ゲームに 6 個の手動スロットと、独立したクイックセーブ、自動セッション保存スロット。
 - SF2 を使った MIDI 合成と、バックグラウンド移行や音声出力先の変更に伴う音声復帰処理。
-- 深緑色の Compose / Material 3 UI、上部のプラットフォーム切り替え、最近のゲーム、ゲーム管理画面、起動ディスク選択シート。
+- Android は Compose / Material 3、iOS は SwiftUI による深緑色のネイティブ UI。プラットフォーム切り替え、最近のゲーム、ゲーム管理画面を用意。
 - **最近更新** タブで現在と過去の更新履歴を表示。ビルド時に CHANGELOG から取り込み。
 - 独立した自動セッション保存、実行速度、画面比率、端末の音声出力設定。
 - PC-98 DOS フォルダーから専用 HDI の作成と FREECG98.BMP の選択。
 
-## はじめに
+## iPhone / iPad
+
+[Apple 版の導入・ビルド手順](ios/README.md)をご覧ください。GitHub Actions の macOS と Xcode で、実機用 IPA とシミュレーター用 App をビルドします。Windows では IPA をダウンロードし、Sideloadly と自分の Apple ID で署名してインストールできます。無料の個人署名は通常 7 日ごとに更新が必要です。
+
+Apple 版は Metal と AVAudioEngine を使い、両エミュレーターコアと共通の実行処理を再利用します。ゲームとセーブデータは Documents/NECMobile に保存され、「ファイル」App やコンピューターのファイル共有でアクセスできます。以下の Android 向け操作には、Apple 版にも対応する項目があります。
+
+## Android での使い方
 
 以下のメニュー名は、アプリの中国語表記に合わせています。
 

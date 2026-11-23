@@ -58,7 +58,7 @@ final class PlayerSession: ObservableObject, Identifiable {
     }
     deinit { timer?.invalidate(); observers.forEach { NotificationCenter.default.removeObserver($0) } }
     func begin() {
-        guard !started else { return }; started = true
+        guard !started && !closing else { return }; started = true
         UIApplication.shared.isIdleTimerDisabled = true
         observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
             guard let self = self else { return }
@@ -173,7 +173,7 @@ final class PlayerSession: ObservableObject, Identifiable {
             do {
                 if save && running && self.savedRevision != revision { try StateStore(self.store.files.directory(game)).save(0); self.savedRevision = revision }
                 NECBridge.stop()
-                DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = false; self.store.player = nil; self.store.reload() }
+                DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = false; if self.store.player?.id == self.id { self.store.player = nil }; self.store.reload() }
             } catch { DispatchQueue.main.async { self.closing = false; self.userPaused = true; self.error = "退出保存未完成：\(error.localizedDescription)"; self.timer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] _ in self?.tick() }; self.applyPause() } }
         }
     }

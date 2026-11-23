@@ -1,4 +1,4 @@
-"""Package the Android application, required core sources, and original licenses."""
+"""Package both mobile applications, core sources, cloud build, and licenses."""
 from pathlib import Path
 import os
 import zipfile
@@ -10,7 +10,7 @@ version = dict(line.split('=', 1) for line in (root / 'version.properties').read
 target = release / f'NEC-Mobile-{version}-sources.zip'
 staging = target.with_suffix('.zip.part')
 files = []
-for folder in ('app', 'native', 'scripts', 'tests',
+for folder in ('app', 'ios', '.github/workflows', 'native', 'scripts', 'tests',
                'third_party/m88/src/common', 'third_party/m88/src/devices',
                'third_party/m88/src/if', 'third_party/m88/src/pc88',
                'third_party/np2kai-source', 'third_party/tinysoundfont', 'third_party/fatfs', 'gradle'):

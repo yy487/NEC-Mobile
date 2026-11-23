@@ -40,7 +40,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
         WindowGroup {
             RootView(store: store).preferredColorScheme(.dark).tint(necAccent)
                 .onChange(of: phase) { store.player?.foreground = $0 == .active }
-                .task { if ProcessInfo.processInfo.arguments.contains("--smoke-test") { await IOSSmoke.run(store) } }
+                .task { if ProcessInfo.processInfo.arguments.contains("--smoke-test") { IOSSmoke.start(store) } }
         }
     }
 }

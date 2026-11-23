@@ -5,6 +5,7 @@
 #include <string>
 #include <sstream>
 #include <map>
+#include <utility>
 
 inline std::string stateHardwareConfig(const std::string& config) {
     std::istringstream input(config); std::string line, result;
@@ -35,6 +36,23 @@ struct SnapshotMeta {
     std::string directory, config;
     std::array<std::string,2> media;
     std::array<uint32_t,2> indices{};
+    bool relocate(const std::string& next) {
+        if (directory == next) return true;
+        const std::string marker = "/NECMobile/pc" + std::to_string(platform) + "/games/";
+        auto before = directory.rfind(marker), after = next.rfind(marker);
+        if (before == std::string::npos || after == std::string::npos || directory.substr(before) != next.substr(after)) return false;
+        auto path = [&](const std::string& value) {
+            return value.compare(0, directory.size() + 1, directory + "/") == 0 ? next + value.substr(directory.size()) : value;
+        };
+        for (auto& disk : media) disk = path(disk);
+        std::istringstream input(config); std::string line, relocated;
+        while (std::getline(input, line)) {
+            auto split = line.find('=');
+            relocated += split == std::string::npos ? line : line.substr(0, split + 1) + path(line.substr(split + 1));
+            relocated += '\n';
+        }
+        config = std::move(relocated); directory = next; return true;
+    }
     bool write(const std::string& path) const {
         std::ofstream out(path,std::ios::binary|std::ios::trunc);
         out.write("NECSTATE024",11);

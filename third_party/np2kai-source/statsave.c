@@ -455,6 +455,24 @@ typedef struct {
 	DOSTIME	time;
 } STATPATH;
 
+#if defined(__APPLE__) && defined(__LIBRETRO__)
+static char necmobile_old_directory[MAX_PATH], necmobile_new_directory[MAX_PATH];
+__attribute__((visibility("default"))) void necmobile_state_paths(const char *before, const char *after) {
+	file_cpyname(necmobile_old_directory, before, MAX_PATH);
+	file_cpyname(necmobile_new_directory, after, MAX_PATH);
+}
+static void necmobile_statpath(STATPATH *sp) {
+	size_t length = strlen(necmobile_old_directory);
+	if (length && !strncmp(sp->path, necmobile_old_directory, length) && sp->path[length] == '/') {
+		char path[MAX_PATH];
+		OEMSNPRINTF(path, sizeof(path), "%s%s", necmobile_new_directory, sp->path + length);
+		file_cpyname(sp->path, path, MAX_PATH);
+	}
+}
+#else
+#define necmobile_statpath(sp) ((void)0)
+#endif
+
 static const OEMCHAR str_updated[] = OEMTEXT("%s: updated");
 static const OEMCHAR str_notfound[] = OEMTEXT("%s: not found");
 
@@ -488,6 +506,7 @@ static int statflag_checkpath(STFLAGH sfh, const OEMCHAR *dvname) {
 	DOSTIME		dostime;
 
 	ret = statflag_read(sfh, &sp, sizeof(sp));
+	necmobile_statpath(&sp);
 	if (sp.path[0]) {
 		fh = file_open_rb(sp.path);
 		if (fh != FILEH_INVALID) {
@@ -1258,6 +1277,7 @@ static int flagload_fdd(STFLAGH sfh, const SFENTRY *tbl) {
 	ret = STATFLAG_SUCCESS;
 	for (i=0; i<4; i++) {
 		ret |= statflag_read(sfh, &sp, sizeof(sp));
+		necmobile_statpath(&sp);
 		if (sp.path[0]) {
 			fdd_set(i, sp.path, sp.ftype, sp.readonly);
 		}
@@ -1372,6 +1392,7 @@ static int flagload_sxsi(STFLAGH sfh, const SFENTRY *tbl) {
 		sxsi_setdevtype(drv, sds.ide[i]);
 		if (sds.ide[i] != SXSIDEV_NC) {
 			ret |= statflag_read(sfh, &sp, sizeof(sp));
+			necmobile_statpath(&sp);
 			sxsi_devopen(drv, sp.path);
 		}
 	}
@@ -1380,6 +1401,7 @@ static int flagload_sxsi(STFLAGH sfh, const SFENTRY *tbl) {
 		sxsi_setdevtype(drv, sds.scsi[i]);
 		if (sds.scsi[i] != SXSIDEV_NC) {
 			ret |= statflag_read(sfh, &sp, sizeof(sp));
+			necmobile_statpath(&sp);
 			sxsi_devopen(drv, sp.path);
 		}
 	}

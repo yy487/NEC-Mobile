@@ -1,2 +1,2 @@
-/third_party/** -text
+/third_party/** -text whitespace=cr-at-eol
 /app/src/main/assets/licenses/** -text
