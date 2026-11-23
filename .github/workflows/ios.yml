@@ -10,6 +10,7 @@ on:
       - 'scripts/*ios*.py'
       - 'third_party/**'
       - 'app/src/main/java/org/necmobile/MachineOptions.java'
+      - 'app/src/main/java/org/necmobile/InputPresets.java'
 permissions:
   contents: read
 concurrency:
@@ -43,6 +44,14 @@ jobs:
           path: |
             release/NEC-Mobile-iOS-unsigned.ipa
             release/NEC-Mobile-iOS-simulator.zip
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iOS-simulator-check
+          path: |
+            work/ios-smoke.log
+            work/ios-smoke/*.png
           retention-days: 14
       - uses: actions/upload-artifact@v4
         if: failure()

@@ -17,7 +17,7 @@ shutil.copytree(ROOT / 'app/src/main/assets', resources, dirs_exist_ok=True)
 shutil.copy2(ROOT / 'CHANGELOG.md', resources / 'updates/changelog.md')
 classes = ROOT / 'work/ios-options'
 classes.mkdir(parents=True, exist_ok=True)
-subprocess.run(['javac', '-encoding', 'UTF-8', '-d', str(classes), str(ROOT / 'app/src/main/java/org/necmobile/MachineOptions.java'),
+subprocess.run(['javac', '-encoding', 'UTF-8', '-d', str(classes), str(ROOT / 'app/src/main/java/org/necmobile/MachineOptions.java'), str(ROOT / 'app/src/main/java/org/necmobile/InputPresets.java'),
                 str(ROOT / 'ios/Tools/ExportOptions.java')], check=True)
 subprocess.run(['java', '-cp', str(classes), 'org.necmobile.ExportOptions', str(resources / 'machine-options.json')], check=True)
 mac_sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()

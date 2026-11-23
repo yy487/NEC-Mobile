@@ -40,7 +40,18 @@ final class PlayerSession: ObservableObject, Identifiable {
     weak var display: NECDisplayView?
     var mouseButtons = 0
     var gestureButtons = 0
-    var mouseMode: Bool { game.input.mode == "mouse" || (game.input.mode == "auto" && game.input.last == "mouse") }
+    var mouseMode: Bool {
+        if game.input.mode == "auto" { return store.files.schema.presets.first { $0.id == game.input.preset }?.mouse ?? (game.input.last == "mouse") }
+        return game.input.mode == "mouse"
+    }
+    var suggestedPreset: String? {
+        let title = game.name.precomposedStringWithCompatibilityMapping.lowercased()
+            .replacingOccurrences(of: #"\([^)]*\)|\[[^]]*\]|【[^】]*】"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[\s_☆・·]"#, with: "", options: .regularExpression)
+        if game.platform == 98 && ["妖刀伝説", "妖刀传说", "youtoudensetsu"].contains(title) { return "keypad-enter" }
+        if game.platform == 88 && ["カサブランカに愛を", "casablanca"].contains(title) { return "text" }
+        return nil
+    }
     var interactive: Bool { ready && !appliedPause && !busy && !closing }
     init(store: LibraryStore, game: Game, restoreSlot: Int?) {
         self.store = store; self.game = game; restoredSlot = restoreSlot
@@ -59,6 +70,7 @@ final class PlayerSession: ObservableObject, Identifiable {
             self.audioInterrupted = type == AVAudioSession.InterruptionType.began.rawValue; self.applyPause()
             if !self.audioInterrupted { NECBridge.audioChanged() }
         })
+        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { _ in NECBridge.audioChanged() })
         timer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] _ in self?.tick() }
         open(game, slot: restoredSlot)
     }
@@ -98,7 +110,7 @@ final class PlayerSession: ObservableObject, Identifiable {
     }
     private func tick() {
         guard !closing else { return }; updateTime(interactive)
-        mouseSuggested = !mouseMode && game.input.mode == "auto" && game.input.preset.isEmpty && NECBridge.mouseActive()
+        mouseSuggested = !mouseMode && game.input.mode == "auto" && game.input.preset.isEmpty && suggestedPreset == nil && NECBridge.mouseActive()
         let warning = NECBridge.takeWarning(); if !warning.isEmpty { message = warning == "Sound BIOS ROM missing" ? "需要声卡 BIOS 的游戏请导入 sound86.rom 或 sound.rom" : warning }
         if ProcessInfo.processInfo.systemUptime - lastCheckpoint >= 60 { lastCheckpoint = ProcessInfo.processInfo.systemUptime; checkpoint() }
     }

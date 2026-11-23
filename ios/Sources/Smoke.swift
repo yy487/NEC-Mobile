@@ -1,43 +1,89 @@
 import Foundation
 
 enum IOSSmoke {
-    static func run(_ store: LibraryStore) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            store.queue.async {
-                var results: [String] = []
-                do {
-                    for platform in [88, 98] {
-                        let source: URL
-                        if platform == 88 {
-                            source = store.files.root.appendingPathComponent("blank.d88")
-                            var header = Data(repeating: 0, count: 0x2b0); let length = UInt32(header.count)
-                            for offset in 0..<4 { header[0x1c + offset] = UInt8((length >> (offset * 8)) & 255) }
-                            try header.write(to: source)
-                        } else { source = try store.files.asset("boot/freedos-v2.fdi") }
-                        let game = try store.files.importImages([source], platform: platform, title: "Core smoke \(platform)")
-                        try store.files.prepare(game)
-                        let first = game.hardDisk ?? game.floppyA
-                        try checked(NECBridge.start(platform, directory: store.files.directory(game).path, first: try store.files.path(game, first), second: try store.files.path(game, game.floppyB), mode: game.mode, firstIndex: first?.index ?? 0, secondIndex: game.floppyB?.index ?? 0))
-                        var deadline = ProcessInfo.processInfo.systemUptime + 45
-                        while NECBridge.startupState() == 1 && ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.05) }
-                        guard NECBridge.startupState() == 2 else { throw NECError(message: "PC-\(platform) 启动失败：\(NECBridge.startupError())") }
-                        NECBridge.pause(false); Thread.sleep(forTimeInterval: 0.5); NECBridge.key(13, down: true); NECBridge.key(13, down: false); Thread.sleep(forTimeInterval: 0.3); NECBridge.pause(true)
-                        guard NECBridge.videoGeometry() != 0 else { throw NECError(message: "PC-\(platform) 没有输出画面") }
-                        let slots = StateStore(store.files.directory(game)); try slots.save(7); try slots.load(7); try slots.save(0)
-                        NECBridge.stop()
-                        try checked(NECBridge.start(platform, directory: store.files.directory(game).path, first: try store.files.path(game, first), second: try store.files.path(game, game.floppyB), mode: game.mode, firstIndex: first?.index ?? 0, secondIndex: game.floppyB?.index ?? 0))
-                        deadline = ProcessInfo.processInfo.systemUptime + 45
-                        while NECBridge.startupState() == 1 && ProcessInfo.processInfo.systemUptime < deadline { Thread.sleep(forTimeInterval: 0.05) }
-                        guard NECBridge.startupState() == 2 else { throw NECError(message: "PC-\(platform) 再次初始化失败") }
-                        try slots.load(0); NECBridge.stop(); try store.files.remove(game)
-                        results.append("PC-\(platform) boot, video, input, compressed save/load and same-process reopen passed")
+    @MainActor static func wait(_ label: String, _ predicate: () -> Bool) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + 45
+        while !predicate() {
+            guard ProcessInfo.processInfo.systemUptime < deadline else { throw NECError(message: label + " 超时") }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+    static func files<T>(_ store: LibraryStore, _ operation: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            store.queue.async { do { continuation.resume(returning: try operation()) } catch { continuation.resume(throwing: error) } }
+        }
+    }
+    @MainActor static func capture(_ name: String, documents: URL) async throws {
+        try Data(name.utf8).write(to: documents.appendingPathComponent("ios-smoke-stage.txt"), options: .atomic)
+        try await wait("截图 " + name) { (try? String(contentsOf: documents.appendingPathComponent("ios-smoke-ack.txt"), encoding: .utf8)) == name }
+    }
+    @MainActor static func run(_ store: LibraryStore) async {
+        let documents = store.files.root.deletingLastPathComponent()
+        var results: [String] = []
+        do {
+            for platform in [88, 98] {
+                let game: Game = try await files(store) {
+                    if platform == 88 {
+                        let imported = try store.files.importContainer(documents.appendingPathComponent("ios-import.zip"), platform: 88)
+                        guard imported.media.first?.titles.count == 2, imported.media.first?.name == "テスト.d88" else { throw NECError(message: "ZIP 日文名称或 D88 内嵌盘导入失败") }
+                        return imported
                     }
-                    try atomicJSON(["status": "passed", "checks": results.joined(separator: "\n")], to: store.files.root.deletingLastPathComponent().appendingPathComponent("ios-smoke.json"))
-                } catch {
-                    NECBridge.stop(); try? atomicJSON(["status": "failed", "error": error.localizedDescription, "checks": results.joined(separator: "\n")], to: store.files.root.deletingLastPathComponent().appendingPathComponent("ios-smoke.json"))
+                    let source = documents.appendingPathComponent("dos-demo")
+                    try fileManager.createDirectory(at: source, withIntermediateDirectories: true)
+                    try Data("@ECHO OFF\r\nECHO NEC Mobile iOS DOS import\r\nPAUSE\r\n".utf8).write(to: source.appendingPathComponent("START.BAT"))
+                    let draft = try store.files.stageDOS(source), template = try store.files.templates()[0]
+                    var imported = try store.files.commitDOS(draft, template: template, entry: "START.BAT", working: "", drive: "C:", initialization: template.autoexec)
+                    let blank = try store.files.addBlank(&imported); imported.floppyA = DiskRef(file: blank.file); try store.files.save(imported)
+                    return imported
                 }
-                continuation.resume()
+                store.platform = platform; store.reload()
+                try await wait("游戏库") { store.games.contains { $0.id == game.id } }
+                try await capture("pc\(platform)-library", documents: documents)
+                store.start(game)
+                guard let session = store.player else { throw NECError(message: "未创建游玩会话") }
+                try await wait("启动 PC-\(platform)") { session.ready || session.error != nil }
+                try checked(session.error ?? "")
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                guard NECBridge.videoGeometry() != 0, let png = session.display?.snapshotPNG(), png.count > 100 else { throw NECError(message: "PC-\(platform) 未输出可用画面") }
+                try png.write(to: documents.appendingPathComponent("pc\(platform)-frame.png"))
+                session.toolsExpanded = true
+                try await capture("pc\(platform)-player", documents: documents)
+                session.toolsExpanded = false
+                NECBridge.key(13, down: true); NECBridge.key(13, down: false)
+                try await Task.sleep(nanoseconds: 300_000_000)
+                session.state(7, load: false)
+                try await wait("快速存档") { !session.busy }; try checked(session.error ?? "")
+                session.state(7, load: true)
+                try await wait("快速读档") { !session.busy }; try checked(session.error ?? "")
+                session.state(1, load: false)
+                try await wait("手动存档") { !session.busy }; try checked(session.error ?? "")
+                session.panel = .disks
+                session.mount(0, ref: nil)
+                try await wait("退盘") { !session.busy }; try checked(session.error ?? "")
+                guard NECBridge.disk(0).isEmpty else { throw NECError(message: "退盘后软驱未清空") }
+                session.mount(0, ref: game.floppyA)
+                try await wait("装盘") { !session.busy }; try checked(session.error ?? "")
+                guard NECBridge.disk(0) == (try store.files.path(game, game.floppyA)) else { throw NECError(message: "装盘结果不匹配") }
+                try await capture("pc\(platform)-disks", documents: documents)
+                session.panel = nil; session.foreground = false
+                try await wait("后台会话保存") { StateStore(store.files.directory(game)).hasAuto() || session.error != nil }; try checked(session.error ?? "")
+                session.foreground = true; session.stop()
+                try await wait("保存并退出") { store.player == nil || session.error != nil }; try checked(session.error ?? "")
+                let saved = try await files(store) { try store.files.find(game.id, platform: platform) }
+                guard saved.playMillis > 0 else { throw NECError(message: "游玩时长没有保存") }
+                try await Task.sleep(nanoseconds: 800_000_000)
+                store.start(saved, slot: 0)
+                guard let reopened = store.player else { throw NECError(message: "未重新创建会话") }
+                try await wait("继续上次游戏") { reopened.ready || reopened.error != nil }; try checked(reopened.error ?? "")
+                reopened.panel = .states
+                try await capture("pc\(platform)-states", documents: documents)
+                reopened.panel = nil; reopened.stop()
+                try await wait("结束会话") { store.player == nil || reopened.error != nil }; try checked(reopened.error ?? "")
+                results.append("PC-\(platform): import, rendered UI, quick/manual state, eject/mount, background save, playtime and resume passed")
             }
+            try atomicJSON(["status": "passed", "checks": results.joined(separator: "\n")], to: documents.appendingPathComponent("ios-smoke.json"))
+        } catch {
+            NECBridge.stop(); try? atomicJSON(["status": "failed", "error": error.localizedDescription, "checks": results.joined(separator: "\n")], to: documents.appendingPathComponent("ios-smoke.json"))
         }
     }
 }

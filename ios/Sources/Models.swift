@@ -76,7 +76,8 @@ struct MachineOption: Codable, Identifiable {
         return value
     }
 }
-struct OptionSchema: Codable { var modes: [String]; var platforms: [String: [MachineOption]] }
+struct InputPreset: Codable, Identifiable { var id: String; var title: String; var mouse: Bool; var keypad: Bool; var tap: Int; var fullKeyboard: Bool }
+struct OptionSchema: Codable { var modes: [String]; var platforms: [String: [MachineOption]]; var presets: [InputPreset] }
 struct FontChoice: Identifiable { var id: String; var name: String; var source: URL }
 struct SnapshotPointer: Codable { var folder: String; var date: Date }
 struct DosDraft: Identifiable {

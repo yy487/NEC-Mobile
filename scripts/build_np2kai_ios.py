@@ -9,16 +9,17 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--sdk', choices=['iphoneos', 'iphonesimulator'], required=True)
-parser.add_argument('--arch', required=True)
+parser.add_argument('--arch', choices=['arm64', 'x86_64'], required=True)
 parser.add_argument('--output', type=Path, required=True)
 args = parser.parse_args()
 sdk = subprocess.check_output(['xcrun', '--sdk', args.sdk, '--show-sdk-path'], text=True).strip()
-workspace = args.output.resolve().parent / 'np2-source'
+workspace = ROOT / 'work' / ('np2-' + args.sdk + '-' + args.arch)
 source = workspace / 'third_party/np2kai-source'
-if not source.exists():
-    shutil.copytree(ROOT / 'third_party/np2kai-source', source, ignore=shutil.ignore_patterns('.git', '*.o'))
-    (workspace / 'native').mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / 'native/rhythm_wav.h', workspace / 'native/rhythm_wav.h')
+source.mkdir(parents=True, exist_ok=True)
+subprocess.run(['rsync', '-a', '--delete', '--exclude=.git', '--exclude=*.o',
+                str(ROOT / 'third_party/np2kai-source') + '/', str(source) + '/'], check=True)
+(workspace / 'native').mkdir(parents=True, exist_ok=True)
+shutil.copy2(ROOT / 'native/rhythm_wav.h', workspace / 'native/rhythm_wav.h')
 framework = args.output.resolve()
 framework.mkdir(parents=True, exist_ok=True)
 target = args.arch + '-apple-ios15.0' + ('-simulator' if args.sdk == 'iphonesimulator' else '')

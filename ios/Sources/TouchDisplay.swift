@@ -14,6 +14,7 @@ final class TouchDisplay: NECDisplayView {
     private var held = false
     private var hold: DispatchWorkItem?
     private var hoverPoint: CGPoint?
+    private var hardwareMouse = false
     init(session: PlayerSession) {
         self.session = session; super.init(frame: .zero)
         isMultipleTouchEnabled = true; isUserInteractionEnabled = true
@@ -22,15 +23,22 @@ final class TouchDisplay: NECDisplayView {
     }
     required init?(coder: NSCoder) { return nil }
     override var canBecomeFirstResponder: Bool { true }
+    override func didMoveToWindow() { super.didMoveToWindow(); if window != nil { becomeFirstResponder() } }
     func cancelInput() {
         hold?.cancel(); hold = nil
         if held { NECBridge.key(direction, down: false) }
         points.removeAll(); originals.removeAll(); primary = nil; fingers = 0; moved = false; dragging = false; direction = 0; held = false; x = 0; y = 0; remainderX = 0; remainderY = 0
         session?.gestureButtons = 0; NECBridge.mouseX(0, y: 0, buttons: session?.mouseButtons ?? 0)
+        hardwareMouse = false; hoverPoint = nil
     }
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let session = session, session.interactive else { return }
         becomeFirstResponder()
+        if session.mouseMode && touches.contains(where: { $0.type == .indirectPointer }) {
+            hardwareMouse = true; hoverPoint = touches.first?.location(in: self)
+            session.gestureButtons = event?.buttonMask.contains(.secondary) == true ? 2 : 1
+            NECBridge.mouseX(0, y: 0, buttons: session.mouseButtons | session.gestureButtons); return
+        }
         if points.isEmpty { cancelInput(); began = ProcessInfo.processInfo.systemUptime }
         for touch in touches { let id = ObjectIdentifier(touch), point = touch.location(in: self); points[id] = point; originals[id] = point; if primary == nil { primary = id }; fingers += 1 }
         if fingers > 1 { hold?.cancel(); if held { NECBridge.key(direction, down: false); held = false }; if dragging { session.gestureButtons = 0; NECBridge.mouseX(0, y: 0, buttons: session.mouseButtons); dragging = false; moved = true } }
@@ -66,9 +74,15 @@ final class TouchDisplay: NECDisplayView {
             hold = item; DispatchQueue.main.asyncAfter(deadline: .now() + 0.42, execute: item)
         }
     }
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) { for touch in touches { move(touch) } }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if hardwareMouse, let point = touches.first?.location(in: self), let old = hoverPoint, let session = session {
+            NECBridge.mouseX(Int((point.x-old.x)*640/max(1,bounds.width)), y: Int((point.y-old.y)*400/max(1,bounds.height)), buttons: session.mouseButtons | session.gestureButtons); hoverPoint = point; return
+        }
+        for touch in touches { move(touch) }
+    }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let session = session else { cancelInput(); return }
+        if hardwareMouse { session.gestureButtons = 0; NECBridge.mouseX(0, y: 0, buttons: session.mouseButtons); hardwareMouse = false; hoverPoint = nil; return }
         for touch in touches { move(touch); points.removeValue(forKey: ObjectIdentifier(touch)) }
         guard points.isEmpty else { return }
         hold?.cancel()
@@ -81,7 +95,7 @@ final class TouchDisplay: NECDisplayView {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { cancelInput() }
     @objc private func hover(_ recognizer: UIHoverGestureRecognizer) {
         let point = recognizer.location(in: self)
-        if let previous = hoverPoint, session?.mouseMode == true, session?.interactive == true {
+        if let previous = hoverPoint, !hardwareMouse, session?.mouseMode == true, session?.interactive == true {
             NECBridge.mouseX(Int((point.x - previous.x) * 640 / max(1, bounds.width)), y: Int((point.y - previous.y) * 400 / max(1, bounds.height)), buttons: session?.mouseButtons ?? 0)
         }
         hoverPoint = recognizer.state == .ended ? nil : point
@@ -101,4 +115,5 @@ final class TouchDisplay: NECDisplayView {
         for press in presses { if let key = press.key, let code = code(key) { NECBridge.key(code, down: true) } }
     }
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) { for press in presses { if let key = press.key, let code = code(key) { NECBridge.key(code, down: false) } } }
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) { NECBridge.releaseKeys() }
 }

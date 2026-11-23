@@ -49,10 +49,6 @@ struct RuntimeDisksView: View {
 }
 struct InputSettingsView: View {
     @ObservedObject var session: PlayerSession
-    private let presets: [(String, String, Bool, Bool, Int, Bool)] = [
-        ("keypad-enter","小键盘 + Enter",false,true,13,false), ("keypad-space","小键盘 + 空格",false,true,32,false),
-        ("arrows-enter","方向键 + Enter",false,false,13,false), ("arrows-space","方向键 + 空格",false,false,32,false),
-        ("mouse","鼠标触控板",true,true,13,false), ("text","文字命令输入",false,true,13,true)]
     var body: some View {
         Form {
             Picker("操作方式", selection: $session.game.input.mode) { Text("自动配置").tag("auto"); Text("滑动按键").tag("keys"); Text("虚拟鼠标").tag("mouse") }
@@ -60,10 +56,10 @@ struct InputSettingsView: View {
             Toggle("滑动使用小键盘 2 / 4 / 6 / 8", isOn: $session.game.input.keypad)
             Picker("鼠标速度", selection: $session.game.input.mouseSpeed) { Text("慢速").tag(0.6); Text("标准").tag(1.0); Text("快速").tag(1.6) }
             Section("操作预设") {
-                ForEach(presets, id: \.0) { preset in
-                    Button(preset.1 + (session.game.input.preset == preset.0 ? " · 已选" : "")) {
-                        session.game.input.preset = preset.0; session.game.input.last = preset.2 ? "mouse" : "keys"; session.game.input.mode = "auto"
-                        session.game.input.keypad = preset.3; session.game.input.tap = preset.4; session.game.input.fullKeyboard = preset.5
+                ForEach(session.store.files.schema.presets) { preset in
+                    Button(preset.title + (session.game.input.preset == preset.id ? " · 已选" : session.suggestedPreset == preset.id ? " · 本游戏建议" : "")) {
+                        session.game.input.preset = preset.id; session.game.input.last = preset.mouse ? "mouse" : "keys"; session.game.input.mode = "auto"
+                        session.game.input.keypad = preset.keypad; session.game.input.tap = preset.tap; session.game.input.fullKeyboard = preset.fullKeyboard
                     }
                 }
             }

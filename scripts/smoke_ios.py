@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import subprocess
 import time
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 def run(*args): return subprocess.check_output(list(args), text=True).strip()
@@ -16,11 +17,30 @@ try:
     subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True)
     app = ROOT / 'work/ios-simulator/Release-iphonesimulator/NECMobile.app'
     run('xcrun', 'simctl', 'install', device, str(app))
-    run('xcrun', 'simctl', 'launch', device, 'org.necmobile.ios', '--smoke-test')
     data = Path(run('xcrun', 'simctl', 'get_app_container', device, 'org.necmobile.ios', 'data'))
+    (data / 'Documents').mkdir(exist_ok=True)
+    fixture = data / 'Documents/ios-import.zip'
+    header = bytearray(0x2b0)
+    header[0x1c:0x20] = len(header).to_bytes(4, 'little')
+    with zipfile.ZipFile(fixture, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('sample.d88', header * 2)
+    fixture.write_bytes(fixture.read_bytes().replace(b'sample.d88', 'テスト.d88'.encode('cp932')))
+    run('xcrun', 'simctl', 'launch', device, 'org.necmobile.ios', '--smoke-test')
     output = data / 'Documents/ios-smoke.json'
-    deadline = time.monotonic() + 180
-    while not output.is_file() and time.monotonic() < deadline: time.sleep(1)
+    captures = ROOT / 'work/ios-smoke'
+    captures.mkdir(exist_ok=True)
+    stage = data / 'Documents/ios-smoke-stage.txt'
+    previous = ''
+    deadline = time.monotonic() + 240
+    while not output.is_file() and time.monotonic() < deadline:
+        current = stage.read_text(encoding='utf-8') if stage.is_file() else ''
+        if current and current != previous:
+            if not current.replace('-', '').isalnum(): raise SystemExit('Invalid screenshot name')
+            time.sleep(0.8)
+            run('xcrun', 'simctl', 'io', device, 'screenshot', str(captures / (current + '.png')))
+            (data / 'Documents/ios-smoke-ack.txt').write_text(current, encoding='utf-8')
+            previous = current
+        time.sleep(0.2)
     if not output.is_file():
         log = run('xcrun', 'simctl', 'spawn', device, 'log', 'show', '--last', '3m', '--style', 'compact', '--predicate', 'process == "NECMobile"')
         (ROOT / 'work/ios-smoke.log').write_text(log, encoding='utf-8')
@@ -28,6 +48,8 @@ try:
     result = json.loads(output.read_text(encoding='utf-8'))
     (ROOT / 'work/ios-smoke.log').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    for frame in (data / 'Documents').glob('pc*-frame.png'):
+        (captures / frame.name).write_bytes(frame.read_bytes())
     if result['status'] != 'passed': raise SystemExit(1)
 finally:
     subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
