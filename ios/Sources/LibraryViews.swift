@@ -22,6 +22,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
         let complete: ([URL]) -> Void; init(_ complete: @escaping ([URL]) -> Void) { self.complete = complete }
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { complete(urls) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { complete([]) }
     }
 }
 
@@ -92,7 +93,7 @@ struct RootView: View {
             NavigationView { PlatformSettingsView(store: store, choose: choose) }.navigationViewStyle(.stack).tabItem { Label("设置", systemImage: "gearshape") }.tag(2)
         }
         .disabled(store.busy && store.player == nil)
-        .sheet(isPresented: $picker) { DocumentPicker(types: types, multiple: multiple) { urls in picker = false; receive(urls) } }
+        .sheet(isPresented: $picker) { DocumentPicker(types: types, multiple: multiple) { urls in picker = false; if !urls.isEmpty { receive(urls) } } }
         .sheet(isPresented: $naming) {
             NavigationView { Form {
                 Text("已选择 \(pendingImages.count) 个文件").foregroundColor(.secondary)

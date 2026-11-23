@@ -21,6 +21,8 @@ final class ImportUITests: XCTestCase {
         picker.name = "document-picker"; picker.lifetime = .keepAlways; add(picker)
         cancel.tap()
         XCTAssertTrue(app.buttons["library.addGame"].waitForExistence(timeout: 5))
+        app.buttons["library.addGame"].tap()
+        XCTAssertTrue(images.waitForExistence(timeout: 5))
         app.terminate()
     }
 }
