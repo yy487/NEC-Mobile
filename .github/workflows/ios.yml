@@ -36,6 +36,12 @@ jobs:
           cmake --version
       - name: Build iPhone and iPad IPA
         run: python3 scripts/build_ios.py
+      - name: Upload device IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEC-Mobile-iOS-device
+          path: release/NEC-Mobile-iOS-unsigned.ipa
+          retention-days: 14
       - name: Build simulator app
         run: python3 scripts/build_ios.py --simulator
       - name: Run simulator smoke check
