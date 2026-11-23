@@ -23,6 +23,41 @@ enum LibrarySheet: Identifiable {
         }
     }
 }
+final class LibraryPresentation: ObservableObject {
+    @Published var sheet: LibrarySheet?
+    @Published private(set) var presenting = false
+    private var afterDismiss: (() -> Void)?
+    func show(_ value: LibrarySheet) { presenting = true; sheet = value }
+    func close() { sheet = nil }
+    func transition(_ action: @escaping () -> Void) {
+        afterDismiss = action; sheet = nil
+        if !presenting { finishTransition() }
+    }
+    func didDismiss() { presenting = false; finishTransition() }
+    private func finishTransition() {
+        let action = afterDismiss; afterDismiss = nil
+        if let action = action { DispatchQueue.main.async(execute: action) }
+    }
+}
+struct GameImportNameView: View {
+    let request: GameImportRequest
+    let submit: (String) -> Void
+    let cancel: () -> Void
+    @State private var name: String
+    init(request: GameImportRequest, submit: @escaping (String) -> Void, cancel: @escaping () -> Void) {
+        self.request = request; self.submit = submit; self.cancel = cancel
+        _name = State(initialValue: request.urls.first?.deletingPathExtension().lastPathComponent ?? "")
+    }
+    var body: some View {
+        NavigationView { Form {
+            Text("已选择 \(request.urls.count) 个文件").foregroundColor(.secondary)
+            TextField("游戏名称", text: $name).accessibilityIdentifier("library.importName")
+            Text("名称需为 1–80 个字符").font(.caption).foregroundColor(.secondary)
+            Button("添加到游戏库") { submit(name) }.accessibilityIdentifier("library.confirmImport")
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > 80)
+        }.navigationTitle("添加游戏").toolbar { Button("取消", action: cancel) } }.navigationViewStyle(.stack)
+    }
+}
 struct ShareView: UIViewControllerRepresentable {
     let url: URL
     let complete: () -> Void
@@ -75,23 +110,19 @@ struct DocumentPicker: UIViewControllerRepresentable {
 
 struct RootView: View {
     @ObservedObject var store: LibraryStore
-    @State private var sheet: LibrarySheet?
-    @State private var afterDismiss: (() -> Void)?
+    @StateObject private var presentation = LibraryPresentation()
     @State private var query88 = ""
     @State private var query98 = ""
     @State private var filter88 = 0
     @State private var filter98 = 0
     @State private var resume: Game?
     @State private var tab = 0
-    @State private var importName = ""
     private func choose(_ purpose: ImportPurpose, types: [UTType], multiple: Bool = false) {
-        guard !store.busy && sheet == nil else { return }
-        sheet = .picker(ImportRequest(purpose: purpose, types: types, multiple: multiple, platform: store.platform))
+        guard !store.busy && !presentation.presenting else { return }
+        presentation.show(.picker(ImportRequest(purpose: purpose, types: types, multiple: multiple, platform: store.platform)))
     }
-    private func dismissThen(_ action: @escaping () -> Void) { afterDismiss = action; sheet = nil }
-    private func didDismiss() { let action = afterDismiss; afterDismiss = nil; action?() }
     private func errorPresented(inSheet: Bool) -> Binding<Bool> {
-        Binding(get: { store.error != nil && store.player == nil && (sheet != nil) == inSheet }, set: { if !$0 { store.error = nil } })
+        Binding(get: { store.error != nil && store.player == nil && (inSheet ? presentation.sheet != nil : !presentation.presenting) }, set: { if !$0 { store.error = nil } })
     }
     var body: some View {
         TabView(selection: $tab) {
@@ -124,7 +155,7 @@ struct RootView: View {
             NavigationView { PlatformSettingsView(store: store, choose: choose) }.navigationViewStyle(.stack).tabItem { Label("设置", systemImage: "gearshape") }.tag(2)
         }
         .disabled(store.busy && store.player == nil)
-        .sheet(item: $sheet, onDismiss: didDismiss) { active in
+        .sheet(item: $presentation.sheet, onDismiss: presentation.didDismiss) { active in
             sheetContent(active).disabled(store.busy).interactiveDismissDisabled(store.busy)
                 .alert("操作未完成", isPresented: errorPresented(inSheet: true)) { Button("知道了") { store.error = nil } } message: { Text(store.error ?? "") }
         }
@@ -138,21 +169,14 @@ struct RootView: View {
         switch active {
         case .picker(let request):
             DocumentPicker(types: request.types, multiple: request.multiple) { urls in
-                if urls.isEmpty { sheet = nil } else { dismissThen { receive(urls, request: request) } }
+                if urls.isEmpty { presentation.close() } else { presentation.transition { receive(urls, request: request) } }
             }
         case .naming(let request):
-            NavigationView { Form {
-                Text("已选择 \(request.urls.count) 个文件").foregroundColor(.secondary)
-                TextField("游戏名称", text: $importName).accessibilityIdentifier("library.importName")
-                Text("名称需为 1–80 个字符").font(.caption).foregroundColor(.secondary)
-                Button("添加到游戏库") {
-                    let name = importName
-                    dismissThen { store.importGames(request.urls, name: name, platform: request.platform) { _ in imported(request.platform) } }
-                }.accessibilityIdentifier("library.confirmImport")
-                    .disabled(importName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || importName.count > 80)
-            }.navigationTitle("添加游戏").toolbar { Button("取消") { sheet = nil } } }.navigationViewStyle(.stack)
+            GameImportNameView(request: request, submit: { name in
+                presentation.transition { store.importGames(request.urls, name: name, platform: request.platform) { _ in imported(request.platform) } }
+            }, cancel: presentation.close)
         case .dos(let draft): DOSWizard(store: store, draft: draft) { imported(98) }
-        case .share(let url): ShareView(url: url) { sheet = nil }
+        case .share(let url): ShareView(url: url, complete: presentation.close)
         case .repair(let game): RepairNamesView(store: store, game: game)
         }
     }
@@ -178,7 +202,7 @@ struct RootView: View {
     private func gameRow(_ game: Game) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 11) {
-                NavigationLink { GameDetailView(store: store, initial: game, choose: choose, present: { sheet = $0 }) } label: {
+                NavigationLink { GameDetailView(store: store, initial: game, choose: choose, present: presentation.show) } label: {
                     HStack(spacing: 11) {
                         if let image = UIImage(contentsOfFile: store.files.directory(game).appendingPathComponent("cover.png").path) { Image(uiImage: image).resizable().scaledToFill().frame(width: 43, height: 43).clipped().cornerRadius(11) }
                         else { Image(systemName: game.mediaType == 1 ? "externaldrive" : "internaldrive").frame(width: 43, height: 43).background(necSurface).cornerRadius(11) }
@@ -186,7 +210,7 @@ struct RootView: View {
                     }
                 }.buttonStyle(.plain)
                 Button { start(game) } label: { Image(systemName: "play.fill").frame(width: 44, height: 44).background(necAccent.opacity(0.1)).clipShape(Circle()) }.accessibilityLabel("启动 \(game.name)")
-                NavigationLink { GameDetailView(store: store, initial: game, choose: choose, present: { sheet = $0 }) } label: { Image(systemName: "ellipsis").frame(width: 30, height: 44) }.accessibilityLabel("游戏管理")
+                NavigationLink { GameDetailView(store: store, initial: game, choose: choose, present: presentation.show) } label: { Image(systemName: "ellipsis").frame(width: 30, height: 44) }.accessibilityLabel("游戏管理")
             }.padding(.vertical, 10)
             Divider()
         }
@@ -195,10 +219,9 @@ struct RootView: View {
         let purpose = request.purpose, platform = request.platform
         switch purpose {
         case .games:
-            importName = urls.first?.deletingPathExtension().lastPathComponent ?? ""
-            sheet = .naming(GameImportRequest(urls: urls, platform: platform))
+            presentation.show(.naming(GameImportRequest(urls: urls, platform: platform)))
         case .dos:
-            guard !urls.isEmpty else { return }; store.perform("正在准备 DOS 目录…", operation: { try store.files.readingSelected(urls) { try store.files.stageDOS($0[0]) } }) { sheet = .dos($0) }
+            guard !urls.isEmpty else { return }; store.perform("正在准备 DOS 目录…", operation: { try store.files.readingSelected(urls) { try store.files.stageDOS($0[0]) } }) { presentation.show(.dos($0)) }
         default:
             store.perform("正在导入资源…", operation: {
                 try store.files.readingSelected(urls) { selected in

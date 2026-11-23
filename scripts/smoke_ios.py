@@ -40,6 +40,8 @@ try:
         subprocess.run(['xcrun', 'xcresulttool', 'export', 'attachments', '--path', str(result_bundle),
                         '--output-path', str(ROOT / 'work/ios-import-ui')], check=False)
     if check.returncode:
+        log = run('xcrun', 'simctl', 'spawn', device, 'log', 'show', '--last', '5m', '--style', 'compact', '--predicate', 'process == "NECMobile"')
+        (ROOT / 'work/ios-runtime.log').write_text(log, encoding='utf-8')
         print((ROOT / 'work/ios-import-ui.log').read_text(encoding='utf-8')[-14000:])
         raise SystemExit('Add-game UI check failed; see ios-import-ui.log.')
     print('Add game button, import menu and document picker passed')

@@ -44,7 +44,7 @@ final class ImportUITests: XCTestCase {
         XCTAssertTrue(app.buttons["PC-88"].waitForExistence(timeout: 10)); app.buttons["PC-88"].tap()
         openPicker(app); record(app, "document-picker"); app.buttons["Cancel"].tap()
         openPicker(app); choose(app, "UI-Disks")
-        XCTAssertTrue(app.buttons["library.confirmImport"].waitForExistence(timeout: 15)); record(app, "import-name")
+        XCTAssertTrue(app.buttons["library.confirmImport"].waitForExistence(timeout: 15), app.debugDescription); record(app, "import-name")
         app.buttons["取消"].tap()
         openPicker(app); choose(app, "UI-Disks"); addSelected(app, "UI-Disks")
         record(app, "disk-imported")
