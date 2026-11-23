@@ -35,9 +35,9 @@ enum IOSSmoke {
                     }
                     let source = documents.appendingPathComponent("dos-demo")
                     try fileManager.createDirectory(at: source, withIntermediateDirectories: true)
-                    try Data("@ECHO OFF\r\nECHO NEC Mobile iOS DOS import\r\nECHO PASS>C:\\IOSBOOT.TXT\r\nPAUSE\r\n".utf8).write(to: source.appendingPathComponent("開始.BAT"))
+                    try Data("@ECHO OFF\r\nECHO NEC Mobile iOS DOS import\r\nECHO PASS>\\IOSBOOT.TXT\r\nPAUSE\r\n".utf8).write(to: source.appendingPathComponent("開始.BAT"))
                     let draft = try store.files.stageDOS(source), template = try store.files.templates()[0]
-                    var imported = try store.files.commitDOS(draft, template: template, entry: "開始.BAT", working: "", drive: "C:", initialization: template.autoexec)
+                    var imported = try store.files.commitDOS(draft, template: template, entry: "開始.BAT", working: "", drive: template.drive, initialization: template.autoexec)
                     let programs = store.files.diskInfo(store.files.mediaURL(imported, imported.media[0]))["programs"] as? [String] ?? []
                     guard programs.contains("NECGAME/開始.BAT") else { throw NECError(message: "DOS 日文入口解码失败") }
                     imported.options["np2kai_FastMC"] = "ON"

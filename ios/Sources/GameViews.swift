@@ -183,7 +183,7 @@ struct DOSWizard: View {
     @State private var templateID = "builtin"
     @State private var entry = ""
     @State private var working = ""
-    @State private var drive = "C:"
+    @State private var drive = "A:"
     @State private var initialization = ""
     @State private var name = ""
     @Environment(\.presentationMode) private var presentation

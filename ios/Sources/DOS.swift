@@ -12,13 +12,13 @@ extension LibraryFiles {
     }
     func templates() throws -> [DosTemplate] {
         let builtin = try asset("boot/freedos-v2.hdi")
-        var result = [DosTemplate(id: "builtin", name: "FreeDOS(98)", file: builtin, drive: "C:", autoexec: String(data: NECBridge.dosAutoexec(builtin.path), encoding: oemJapanese) ?? "@ECHO OFF\r\n")]
+        var result = [DosTemplate(id: "builtin", name: "FreeDOS(98)", file: builtin, drive: "A:", autoexec: String(data: NECBridge.dosAutoexec(builtin.path), encoding: oemJapanese) ?? "@ECHO OFF\r\n")]
         let folder = platformRoot(98).appendingPathComponent("dos-templates")
         for file in (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [] where ["hdi", "nhd", "hdd", "thd"].contains(file.pathExtension.lowercased()) {
             let info = diskInfo(file)
             guard info["boot"] as? String == "ready" else { continue }
             let label = (try? String(contentsOf: file.appendingPathExtension("name"), encoding: .utf8)) ?? file.lastPathComponent
-            result.append(DosTemplate(id: file.lastPathComponent, name: label, file: file, drive: info["system"] as? String == "freedos" ? "C:" : "A:", autoexec: String(data: NECBridge.dosAutoexec(file.path), encoding: oemJapanese) ?? "@ECHO OFF\r\n"))
+            result.append(DosTemplate(id: file.lastPathComponent, name: label, file: file, drive: "A:", autoexec: String(data: NECBridge.dosAutoexec(file.path), encoding: oemJapanese) ?? "@ECHO OFF\r\n"))
         }
         return result
     }

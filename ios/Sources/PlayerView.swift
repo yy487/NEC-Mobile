@@ -39,16 +39,17 @@ struct PlayerView: View {
                 .onChange(of: geometry.size) { size in session.cancelTouches?(); session.toolsExpanded = false; landscape = size.width > size.height; loadPosition() }
         }
         .statusBar(hidden: true).preferredColorScheme(.dark).tint(necAccent)
-        .sheet(item: $session.panel) { panel in NavigationView { panelView(panel).toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("返回游戏") { session.panel = nil } } } }.navigationViewStyle(.stack).interactiveDismissDisabled(session.busy) }
-        .confirmationDialog("退出游戏？", isPresented: $exit, titleVisibility: .visible) { Button("保存并退出") { session.panel = nil; session.stop() }; Button("继续游玩", role: .cancel) {} }
-        .confirmationDialog("复位机器？", isPresented: $reset, titleVisibility: .visible) { Button("复位", role: .destructive) { session.reset() }; Button("取消", role: .cancel) {} } message: { Text("未保存的机器进度会丢失。") }
-        .alert("操作未完成", isPresented: Binding(get: { session.error != nil }, set: { if !$0 { session.error = nil } })) {
-            if session.error?.hasPrefix("退出保存未完成") == true { Button("重试退出") { session.error = nil; session.stop() }; Button("退出但不保存", role: .destructive) { session.error = nil; session.stop(save: false) } }
-            if !session.ready { Button("返回游戏库") { session.error = nil; session.stop(save: false) } }
-            Button("知道了", role: .cancel) { session.error = nil }
-        } message: { Text(session.error ?? "") }
+        .sheet(item: $session.panel) { panel in NavigationView { panelView(panel).toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("返回游戏") { session.panel = nil } } } }.navigationViewStyle(.stack).interactiveDismissDisabled(session.busy)
+            .alert("操作未完成", isPresented: showingError(inPanel: true)) { errorActions } message: { Text(session.error ?? "") } }
+        .alert("操作未完成", isPresented: showingError(inPanel: false)) { errorActions } message: { Text(session.error ?? "") }
         .onDisappear { session.cancelTouches?(); OrientationDelegate.apply("AUTO"); if !session.closing { session.stop() } }
         .onReceive(session.store.$error) { value in if let value = value { session.error = value; session.store.error = nil } }
+    }
+    private func showingError(inPanel: Bool) -> Binding<Bool> { Binding(get: { session.error != nil && (session.panel != nil) == inPanel }, set: { if !$0 { session.error = nil } }) }
+    @ViewBuilder private var errorActions: some View {
+        if session.error?.hasPrefix("退出保存未完成") == true { Button("重试退出") { session.error = nil; session.stop() }; Button("退出但不保存", role: .destructive) { session.error = nil; session.stop(save: false) } }
+        if !session.ready { Button("返回游戏库") { session.error = nil; session.stop(save: false) } }
+        Button("知道了", role: .cancel) { session.error = nil }
     }
     @ViewBuilder private func panelView(_ panel: PlayerPanel) -> some View {
         switch panel {
@@ -68,6 +69,8 @@ struct PlayerView: View {
                 Button("复位机器", role: .destructive) { reset = true }
                 Button("退出游戏", role: .destructive) { exit = true }
             }.navigationTitle("游戏菜单")
+                .confirmationDialog("退出游戏？", isPresented: $exit, titleVisibility: .visible) { Button("保存并退出") { session.panel = nil; session.stop() }; Button("继续游玩", role: .cancel) {} }
+                .confirmationDialog("复位机器？", isPresented: $reset, titleVisibility: .visible) { Button("复位", role: .destructive) { session.reset() }; Button("取消", role: .cancel) {} } message: { Text("未保存的机器进度会丢失。") }
         case .states: StateSlotsView(session: session)
         case .disks: RuntimeDisksView(session: session)
         case .input: InputSettingsView(session: session)
