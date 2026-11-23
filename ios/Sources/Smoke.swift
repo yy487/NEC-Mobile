@@ -35,11 +35,12 @@ enum IOSSmoke {
                     }
                     let source = documents.appendingPathComponent("dos-demo")
                     try fileManager.createDirectory(at: source, withIntermediateDirectories: true)
-                    try Data("@ECHO OFF\r\nECHO NEC Mobile iOS DOS import\r\nPAUSE\r\n".utf8).write(to: source.appendingPathComponent("開始.BAT"))
+                    try Data("@ECHO OFF\r\nECHO NEC Mobile iOS DOS import\r\nECHO PASS>C:\\IOSBOOT.TXT\r\nPAUSE\r\n".utf8).write(to: source.appendingPathComponent("開始.BAT"))
                     let draft = try store.files.stageDOS(source), template = try store.files.templates()[0]
                     var imported = try store.files.commitDOS(draft, template: template, entry: "開始.BAT", working: "", drive: "C:", initialization: template.autoexec)
                     let programs = store.files.diskInfo(store.files.mediaURL(imported, imported.media[0]))["programs"] as? [String] ?? []
                     guard programs.contains("NECGAME/開始.BAT") else { throw NECError(message: "DOS 日文入口解码失败") }
+                    imported.options["np2kai_FastMC"] = "ON"
                     let blank = try store.files.addBlank(&imported); imported.floppyA = DiskRef(file: blank.file); try store.files.save(imported)
                     return imported
                 }
@@ -50,7 +51,7 @@ enum IOSSmoke {
                 guard let session = store.player else { throw NECError(message: "未创建游玩会话") }
                 try await wait("启动 PC-\(platform)") { session.ready || session.error != nil }
                 try checked(session.error ?? "")
-                try await Task.sleep(nanoseconds: 3_000_000_000)
+                try await Task.sleep(nanoseconds: platform == 98 ? 15_000_000_000 : 3_000_000_000)
                 guard NECBridge.videoGeometry() != 0, let png = session.display?.snapshotPNG(), png.count > 100 else { throw NECError(message: "PC-\(platform) 未输出可用画面") }
                 try png.write(to: documents.appendingPathComponent("pc\(platform)-frame.png"))
                 session.toolsExpanded = true
@@ -58,8 +59,15 @@ enum IOSSmoke {
                 session.toolsExpanded = false
                 NECBridge.key(13, down: true); NECBridge.key(13, down: false)
                 try await Task.sleep(nanoseconds: 300_000_000)
+                session.userPaused = true
                 session.state(7, load: false)
                 try await wait("快速存档") { !session.busy }; try checked(session.error ?? "")
+                if platform == 98 {
+                    let entries = try await files(store) { store.files.diskInfo(store.files.mediaURL(game, game.media[0]))["entries"] as? [[String: Any]] ?? [] }
+                    guard entries.contains(where: { $0["name"] as? String == "IOSBOOT.TXT" }) else { throw NECError(message: "DOS 启动脚本未执行，请查看 PC-98 画面") }
+                    results.append("PC-98: Japanese DOS startup script executed and wrote IOSBOOT.TXT")
+                }
+                session.userPaused = false
                 session.state(7, load: true)
                 try await wait("快速读档") { !session.busy }; try checked(session.error ?? "")
                 session.state(1, load: false)
