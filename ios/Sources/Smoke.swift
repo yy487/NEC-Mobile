@@ -118,6 +118,15 @@ enum IOSSmoke {
                 }
                 results.append("PC-\(platform): import, rendered UI, quick/manual state, eject/mount, background save, playtime and resume passed")
                 results.append("PC-\(platform): saved session restored after moving the data directory")
+                try await files(store) {
+                    let revision = UUID().uuidString
+                    try store.files.update(game.id, platform: platform) { $0.firmwareRevision = revision; $0.input.mode = "mouse" }
+                    let latest = try store.files.find(game.id, platform: platform)
+                    let edited = try store.files.saveEdits(game)
+                    guard edited.playMillis == latest.playMillis, edited.played == latest.played,
+                          edited.firmwareRevision == revision, edited.input.mode == "mouse" else { throw NECError(message: "保存配置覆盖了最新进度或资源状态") }
+                }
+                results.append("PC-\(platform): configuration save preserves current playtime, resources and input")
             }
             try atomicJSON(["status": "passed", "checks": results.joined(separator: "\n")], to: documents.appendingPathComponent("ios-smoke.json"))
         } catch {

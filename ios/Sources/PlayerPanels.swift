@@ -2,24 +2,29 @@ import SwiftUI
 
 struct StateSlotsView: View {
     @ObservedObject var session: PlayerSession
+    @EnvironmentObject private var library: LibraryStore
     @State private var selected = 1
-    @State private var actions = false
     @State private var overwrite = false
     private var slots: StateStore { StateStore(session.store.files.directory(session.game)) }
     var body: some View {
         ScrollView { LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            ForEach(StateStore.slots, id: \.self) { slot in Button { selected = slot; actions = true } label: { Text(slots.label(slot)).font(.caption).frame(maxWidth: .infinity, minHeight: 64).padding(6).background(necSurface).cornerRadius(12) } }
-        }.padding() }.navigationTitle("即时存档 / 读档")
-            .confirmationDialog(slots.label(selected), isPresented: $actions, titleVisibility: .visible) {
-                Button("保存当前进度") { if (try? slots.record(selected)) != nil { overwrite = true } else { session.state(selected, load: false) } }
-                Button("读取此槽") { session.state(selected, load: true) }
-                Button("删除此槽", role: .destructive) { session.removeState(selected) }
+            ForEach(StateStore.slots, id: \.self) { slot in
+                let occupied = fileManager.fileExists(atPath: slots.pointer(slot).path)
+                Menu {
+                    Button("保存当前进度") { selected = slot; if occupied { overwrite = true } else { session.state(slot, load: false) } }
+                    Button("读取此槽") { session.state(slot, load: true) }.disabled(!occupied)
+                    Button("删除此槽", role: .destructive) { session.removeState(slot) }.disabled(!occupied)
+                } label: { Text(slots.label(slot)).font(.caption).frame(maxWidth: .infinity, minHeight: 64).padding(6).background(necSurface).cornerRadius(12) }
+                    .accessibilityIdentifier("state.slot.\(slot)")
             }
+        }.padding() }.navigationTitle("即时存档 / 读档")
+            .disabled(session.busy || library.busy)
             .alert("覆盖存档？", isPresented: $overwrite) { Button("保存") { session.state(selected, load: false) }; Button("取消", role: .cancel) {} } message: { Text("将用当前进度替换这个槽。") }
     }
 }
 struct RuntimeDisksView: View {
     @ObservedObject var session: PlayerSession
+    @EnvironmentObject private var library: LibraryStore
     private func mounted(_ drive: Int) -> String {
         let path = NECBridge.disk(drive); guard !path.isEmpty else { return "空" }
         let name = (path as NSString).lastPathComponent
@@ -44,7 +49,7 @@ struct RuntimeDisksView: View {
                     session.store.perform("正在创建存档盘…", operation: { var fresh = try session.store.files.find(game.id, platform: game.platform); _ = try session.store.files.addBlank(&fresh); return fresh.media }) { session.game.media = $0 }
                 }
             }
-        }.navigationTitle("更换 / 取出磁盘").disabled(session.busy || session.store.busy)
+        }.navigationTitle("更换 / 取出磁盘").disabled(session.busy || library.busy)
     }
 }
 struct InputSettingsView: View {
@@ -69,6 +74,7 @@ struct InputSettingsView: View {
 }
 struct PlayerSoundView: View {
     @ObservedObject var session: PlayerSession
+    @EnvironmentObject private var library: LibraryStore
     @State private var game: Game?
     var body: some View {
         Group {
@@ -77,9 +83,9 @@ struct PlayerSoundView: View {
                     ForEach((session.store.files.schema.platforms[String(current.platform)] ?? []).filter { [1,2,3,6].contains($0.group) }) { option in
                         OptionControl(option: option, game: Binding(get: { game ?? current }, set: { game = $0 }))
                     }
-                    Button("保存，下次启动生效") { if let game = game { session.store.save(game) { session.message = "音源设置已保存，下次启动生效" } } }
-                }
+                    Button("保存，下次启动生效") { if let edited = game { session.store.save(edited) { saved in game = saved; session.message = "音源设置已保存，下次启动生效" } } }
+                }.disabled(library.busy)
             } else { ProgressView() }
-        }.navigationTitle("本游戏音源设置").onAppear { let original = session.game; session.store.queue.async { let value = try? session.store.files.find(original.id, platform: original.platform); DispatchQueue.main.async { game = value } } }
+        }.navigationTitle("本游戏音源设置").onAppear { guard game == nil else { return }; let original = session.game; session.store.queue.async { do { let value = try session.store.files.find(original.id, platform: original.platform); DispatchQueue.main.async { game = value } } catch { DispatchQueue.main.async { session.error = error.localizedDescription } } } }
     }
 }

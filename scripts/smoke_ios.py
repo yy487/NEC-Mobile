@@ -17,6 +17,19 @@ try:
     subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True)
     app = ROOT / 'work/ios-simulator/Release-iphonesimulator/NECMobile.app'
     run('xcrun', 'simctl', 'install', device, str(app))
+    initial_data = Path(run('xcrun', 'simctl', 'get_app_container', device, 'org.necmobile.ios', 'data'))
+    fixtures = initial_data / 'Documents/ImportUI'
+    fixtures.mkdir(parents=True, exist_ok=True)
+    header = bytearray(0x2b0); header[0x1c:0x20] = len(header).to_bytes(4, 'little')
+    (fixtures / 'UI-Disks.d88').write_bytes(header * 2)
+    (fixtures / 'UI-Bad.d88').write_bytes(b'incomplete disk')
+    folder = fixtures / 'UIFolder'; folder.mkdir(exist_ok=True)
+    (folder / 'disk.d88').write_bytes(header)
+    (folder / 'EMPTY.TXT').write_bytes(b'')
+    dos = fixtures / 'UIDOS'; dos.mkdir(exist_ok=True)
+    (dos / 'START.BAT').write_bytes(b'@ECHO OFF\r\nECHO UI DOS\r\nPAUSE\r\n')
+    with zipfile.ZipFile(fixtures / 'UI-Archive.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('disk.d88', header)
     result_bundle = ROOT / 'work/ios-import-ui.xcresult'
     with (ROOT / 'work/ios-import-ui.log').open('w', encoding='utf-8') as log:
         check = subprocess.run(['xcodebuild', 'test', '-project', str(ROOT / 'work/ios-simulator/NECMobileApple.xcodeproj'),

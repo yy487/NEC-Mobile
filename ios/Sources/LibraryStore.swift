@@ -34,9 +34,39 @@ final class LibraryFiles {
     func find(_ id: String, platform: Int) throws -> Game {
         guard let game = try list(platform).first(where: { $0.id == id }) else { throw NECError(message: "找不到游戏记录") }; return game
     }
-    func save(_ game: Game) throws {
+    func readingSelected<T>(_ urls: [URL], operation: ([URL]) throws -> T) throws -> T {
+        func read(_ index: Int, _ coordinated: [URL]) throws -> T {
+            guard index < urls.count else { return try operation(coordinated) }
+            let source = urls[index], scoped = source.startAccessingSecurityScopedResource()
+            defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+            var failure: NSError?, result: Result<T, Error>?
+            NSFileCoordinator().coordinate(readingItemAt: source, options: .withoutChanges, error: &failure) { url in
+                result = Result { try read(index + 1, coordinated + [url]) }
+            }
+            if let failure = failure { throw failure }
+            guard let result = result else { throw NECError(message: "无法读取所选文件，请检查文件是否已下载") }
+            return try result.get()
+        }
+        return try read(0, [])
+    }
+    func save(_ value: Game) throws {
+        var game = value; game.name = game.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !game.name.isEmpty, game.name.count <= 80 else { throw NECError(message: "游戏名称需为 1–80 个字符") }
         var entries = try list(game.platform); if let index = entries.firstIndex(where: { $0.id == game.id }) { entries[index] = game } else { entries.append(game) }
         try atomicJSON(entries, to: platformRoot(game.platform).appendingPathComponent("games.json"))
+    }
+    func saveEdits(_ edited: Game) throws -> Game {
+        let latest = try find(edited.id, platform: edited.platform)
+        var merged = edited
+        merged.played = latest.played; merged.playMillis = latest.playMillis
+        merged.lastPlaySession = latest.lastPlaySession; merged.lastPlayMillis = latest.lastPlayMillis
+        merged.lastMachineInfo = latest.lastMachineInfo; merged.firmwareRevision = latest.firmwareRevision
+        merged.input = latest.input
+        merged.media = latest.media.map { disk in
+            var result = disk; if let name = edited.media.first(where: { $0.file == disk.file })?.name { result.name = name }; return result
+        }
+        merged.name = merged.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        try save(merged); return merged
     }
     func update(_ id: String, platform: Int, change: (inout Game) throws -> Void) throws {
         var game = try find(id, platform: platform); try change(&game); try save(game)
@@ -95,6 +125,8 @@ final class LibraryFiles {
         do {
             for source in sources {
                 let ext = source.pathExtension.lowercased(), allowed = platform == 88 ? Self.supported88 : Self.supported98
+                let cover = ["png", "jpg", "jpeg", "webp"].contains(ext) && ["cover", "folder", "front", "title"].contains(source.deletingPathExtension().lastPathComponent.lowercased())
+                guard allowed.contains(ext) || ["rom", "fnt", "bmp", "wav", "bin"].contains(ext) || cover else { continue }
                 let size = byteSize(source); total += size
                 guard size > 0, size <= 4 * 1024 * 1024 * 1024, total <= 8 * 1024 * 1024 * 1024 else { throw NECError(message: "游戏文件为空或超过导入上限") }
                 if allowed.contains(ext) {
@@ -232,7 +264,6 @@ final class LibraryStore: ObservableObject {
     @Published var platform: Int = UserDefaults.standard.object(forKey: "platform") as? Int ?? 98 { didSet { UserDefaults.standard.set(platform, forKey: "platform"); reload() } }
     @Published var busy = false; @Published var progress = ""; @Published var error: String?
     @Published var player: PlayerSession?
-    @Published var dosDraft: DosDraft?
     init() {
         do { files = try LibraryFiles() } catch { fatalError("无法准备应用目录：\(error)") }
         reload()
@@ -245,20 +276,20 @@ final class LibraryStore: ObservableObject {
     func perform<T>(_ message: String, operation: @escaping () throws -> T, complete: @escaping (T) -> Void = { _ in }) {
         guard !busy else { return }; busy = true; progress = message
         queue.async { do { let result = try operation(); DispatchQueue.main.async { self.busy = false; self.progress = ""; self.reload(); complete(result) } }
-            catch { DispatchQueue.main.async { self.busy = false; self.progress = ""; self.error = error.localizedDescription } } }
+            catch { DispatchQueue.main.async { self.busy = false; self.progress = ""; self.reload(); self.error = error.localizedDescription } } }
     }
-    func save(_ game: Game, complete: @escaping () -> Void = {}) { perform("正在保存配置…", operation: { try self.files.save(game) }) { _ in complete() } }
+    func save(_ game: Game, complete: @escaping (Game) -> Void = { _ in }) { perform("正在保存配置…", operation: { try self.files.saveEdits(game) }, complete: complete) }
     func start(_ game: Game, slot: Int? = nil) {
         guard player == nil else { return }
         let session = PlayerSession(store: self, game: game, restoreSlot: slot)
         player = session; session.begin()
     }
-    func importGames(_ urls: [URL], name: String? = nil) {
-        let platform = platform
+    func importGames(_ urls: [URL], name: String? = nil, platform selectedPlatform: Int? = nil, complete: @escaping (Game) -> Void = { _ in }) {
+        let platform = selectedPlatform ?? platform
         perform("正在导入游戏…", operation: {
-            var scoped: [URL] = []; defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
-            for url in urls where url.startAccessingSecurityScopedResource() { scoped.append(url) }
-            if urls.count == 1, let first = urls.first {
+            if let name = name { let value = name.trimmingCharacters(in: .whitespacesAndNewlines); guard !value.isEmpty, value.count <= 80 else { throw NECError(message: "游戏名称需为 1–80 个字符") } }
+            return try self.files.readingSelected(urls) { selected in
+            if selected.count == 1, let first = selected.first {
                 let directory = try first.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
                 if first.pathExtension.lowercased() == "zip" || directory {
                     var game = try self.files.importContainer(first, platform: platform)
@@ -266,7 +297,8 @@ final class LibraryStore: ObservableObject {
                     return game
                 }
             }
-            return try self.files.importImages(urls, platform: platform, title: name)
-        }) { _ in self.progress = "已添加到游戏库" }
+            return try self.files.importImages(selected, platform: platform, title: name)
+            }
+        }) { game in self.progress = "已添加到游戏库"; complete(game) }
     }
 }

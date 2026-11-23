@@ -20,6 +20,7 @@ struct MetalSurface: UIViewRepresentable {
 }
 struct PlayerView: View {
     @ObservedObject var session: PlayerSession
+    @EnvironmentObject private var library: LibraryStore
     @State private var exit = false
     @State private var reset = false
     @State private var position = CGPoint(x: 1, y: 0.9)
@@ -39,7 +40,7 @@ struct PlayerView: View {
                 .onChange(of: geometry.size) { size in session.cancelTouches?(); session.toolsExpanded = false; landscape = size.width > size.height; loadPosition() }
         }
         .statusBar(hidden: true).preferredColorScheme(.dark).tint(necAccent)
-        .sheet(item: $session.panel) { panel in NavigationView { panelView(panel).toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("返回游戏") { session.panel = nil } } } }.navigationViewStyle(.stack).interactiveDismissDisabled(session.busy)
+        .sheet(item: $session.panel) { panel in NavigationView { panelView(panel).toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("返回游戏") { session.panel = nil }.disabled(session.busy || library.busy) } } }.navigationViewStyle(.stack).interactiveDismissDisabled(session.busy || library.busy)
             .alert("操作未完成", isPresented: showingError(inPanel: true)) { errorActions } message: { Text(session.error ?? "") } }
         .alert("操作未完成", isPresented: showingError(inPanel: false)) { errorActions } message: { Text(session.error ?? "") }
         .onDisappear { session.cancelTouches?(); OrientationDelegate.apply("AUTO"); if !session.closing { session.stop() } }
@@ -108,12 +109,12 @@ struct PlayerView: View {
             }
             Button { session.toolsExpanded.toggle() } label: { Text(expanded ? "×" : "≡").font(.system(size: expanded ? 30 : 24, weight: .bold)).frame(width: expanded ? 68 : 48, height: expanded ? 68 : 48).background(necSurface.opacity(expanded ? 0.95 : 0.6)).clipShape(Circle()) }
                 .accessibilityLabel(expanded ? "收起工具栏" : "展开工具栏")
-                .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { value in if dragOrigin == nil { dragOrigin = CGPoint(x: centerX, y: centerY) }; session.toolsExpanded = false; drag = value.translation }.onEnded { value in
+                .highPriorityGesture(DragGesture(minimumDistance: 12).onChanged { value in if dragOrigin == nil { dragOrigin = CGPoint(x: centerX, y: centerY) }; session.toolsExpanded = false; drag = value.translation }.onEnded { value in
                     let origin = dragOrigin ?? CGPoint(x: centerX, y: centerY)
                     position.x = origin.x + value.translation.width < width / 2 ? 0 : 1; position.y = max(0, min(1, (origin.y + value.translation.height - geometry.safeAreaInsets.top - 32) / max(1, height - 64 - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom))); drag = .zero; dragOrigin = nil
                     let key = landscape ? "wheel.landscape" : "wheel.portrait"; UserDefaults.standard.set(Double(position.x), forKey: key + ".x"); UserDefaults.standard.set(Double(position.y), forKey: key + ".y")
                 })
-        }.frame(width: diameter, height: diameter).position(x: centerX, y: centerY).foregroundColor(.white).disabled(session.busy || session.closing)
+        }.frame(width: diameter, height: diameter).position(x: centerX, y: centerY).foregroundColor(.white).disabled(session.busy || session.closing || library.busy)
     }
     @ViewBuilder private func wheelAction(_ index: Int) -> some View {
         switch index {
@@ -123,7 +124,7 @@ struct PlayerView: View {
         case 3: Button("快存") { session.toolsExpanded = false; session.state(7, load: false) }.font(.caption)
         case 4: Button("快读") { session.toolsExpanded = false; session.state(7, load: true) }.font(.caption)
         case 5: Button("键盘") { session.cancelTouches?(); session.toolsExpanded = false; session.keyboardVisible.toggle() }.font(.caption)
-        case 6: Button(session.mouseMode ? "鼠标" : session.mouseSuggested ? "试用鼠标" : "按键") { session.toggleInput() }.font(.caption).simultaneousGesture(LongPressGesture().onEnded { _ in session.toolsExpanded = false; session.panel = .input })
+        case 6: Button(session.mouseMode ? "鼠标" : session.mouseSuggested ? "试用鼠标" : "按键") { session.toggleInput() }.font(.caption).highPriorityGesture(LongPressGesture().onEnded { _ in session.toolsExpanded = false; session.panel = .input })
         default: Button("菜单") { session.toolsExpanded = false; session.panel = .menu }.font(.caption)
         }
     }
@@ -145,7 +146,7 @@ struct EmulatedKey: View {
             }.onEnded { _ in
                 if sticky && down { if session.modifiers.contains(code) { session.modifiers.remove(code); NECBridge.key(code, down: false) } else { session.modifiers.insert(code); NECBridge.key(code, down: true) } }
                 else { NECBridge.key(code, down: false) }; down = false
-            }).onDisappear { if down { NECBridge.key(code, down: false); down = false } }
+            }).onDisappear { if down || (sticky && session.modifiers.contains(code)) { NECBridge.key(code, down: false); session.modifiers.remove(code); down = false } }
     }
 }
 struct KeyboardOverlay: View {
@@ -164,7 +165,7 @@ struct KeyboardOverlay: View {
             if session.game.input.fullKeyboard { row(["F6","F7","F8","F9","F10"], [287,288,289,290,291]) }
             row(["←","↑","↓","→","空格","Enter"], [276,273,274,275,32,13]); row(["SHIFT","CTRL","KANA"], [304,306,302], sticky: true)
             row(["BS","TAB","STOP"], [8,9,19])
-            Button(session.game.input.fullKeyboard ? "精简键盘" : "完整键盘") { NECBridge.releaseKeys(); session.game.input.fullKeyboard.toggle(); session.persistInput() }.font(.caption).padding(8)
+            Button(session.game.input.fullKeyboard ? "精简键盘" : "完整键盘") { NECBridge.releaseKeys(); session.modifiers.removeAll(); session.game.input.fullKeyboard.toggle(); session.persistInput() }.font(.caption).padding(8)
         }.padding(5) }.background(necBackground.opacity(0.92)).cornerRadius(12)
     }
 }

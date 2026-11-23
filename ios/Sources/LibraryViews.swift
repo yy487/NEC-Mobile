@@ -6,17 +6,44 @@ let necSurface = Color(red: 32/255, green: 39/255, blue: 36/255)
 let necAccent = Color(red: 199/255, green: 236/255, blue: 170/255)
 
 enum ImportPurpose { case games, dos, resource(Game?), soundfont, template }
-struct ShareItem: Identifiable { let id = UUID(); var url: URL }
+struct ImportRequest: Identifiable {
+    let id = UUID()
+    var purpose: ImportPurpose; var types: [UTType]; var multiple: Bool; var platform: Int
+}
+struct GameImportRequest: Identifiable { let id = UUID(); var urls: [URL]; var platform: Int }
+enum LibrarySheet: Identifiable {
+    case picker(ImportRequest), naming(GameImportRequest), dos(DosDraft), share(URL), repair(Binding<Game>)
+    var id: String {
+        switch self {
+        case .picker(let request): return "picker-\(request.id)"
+        case .naming(let request): return "naming-\(request.id)"
+        case .dos(let draft): return "dos-\(draft.id)"
+        case .share(let url): return "share-" + url.path
+        case .repair(let game): return "repair-" + game.wrappedValue.id
+        }
+    }
+}
 struct ShareView: UIViewControllerRepresentable {
     let url: URL
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: [url], applicationActivities: nil) }
+    let complete: () -> Void
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in DispatchQueue.main.async { complete() } }
+        return controller
+    }
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 struct DocumentPicker: UIViewControllerRepresentable {
     var types: [UTType]; var multiple: Bool; var complete: ([URL]) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(complete) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false); picker.allowsMultipleSelection = multiple; picker.delegate = context.coordinator; picker.view.accessibilityIdentifier = "library.documentPicker"; return picker
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false); picker.allowsMultipleSelection = multiple; picker.delegate = context.coordinator; picker.view.accessibilityIdentifier = "library.documentPicker"
+#if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("--import-ui-fixtures") {
+            picker.directoryURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("ImportUI", isDirectory: true)
+        }
+#endif
+        return picker
     }
     func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
@@ -48,20 +75,24 @@ struct DocumentPicker: UIViewControllerRepresentable {
 
 struct RootView: View {
     @ObservedObject var store: LibraryStore
-    @State private var picker = false
-    @State private var purpose = ImportPurpose.games
-    @State private var types: [UTType] = [.data]
-    @State private var multiple = true
+    @State private var sheet: LibrarySheet?
+    @State private var afterDismiss: (() -> Void)?
     @State private var query88 = ""
     @State private var query98 = ""
     @State private var filter88 = 0
     @State private var filter98 = 0
     @State private var resume: Game?
     @State private var tab = 0
-    @State private var pendingImages: [URL] = []
     @State private var importName = ""
-    @State private var naming = false
-    private func choose(_ purpose: ImportPurpose, types: [UTType], multiple: Bool = false) { self.purpose = purpose; self.types = types; self.multiple = multiple; picker = true }
+    private func choose(_ purpose: ImportPurpose, types: [UTType], multiple: Bool = false) {
+        guard !store.busy && sheet == nil else { return }
+        sheet = .picker(ImportRequest(purpose: purpose, types: types, multiple: multiple, platform: store.platform))
+    }
+    private func dismissThen(_ action: @escaping () -> Void) { afterDismiss = action; sheet = nil }
+    private func didDismiss() { let action = afterDismiss; afterDismiss = nil; action?() }
+    private func errorPresented(inSheet: Bool) -> Binding<Bool> {
+        Binding(get: { store.error != nil && store.player == nil && (sheet != nil) == inSheet }, set: { if !$0 { store.error = nil } })
+    }
     var body: some View {
         TabView(selection: $tab) {
             NavigationView {
@@ -82,9 +113,9 @@ struct RootView: View {
                     .toolbar {
                         Menu {
                             Button("选择多张磁盘镜像") { choose(.games, types: [.data], multiple: true) }.accessibilityIdentifier("library.importImages")
-                            Button("游戏文件夹") { choose(.games, types: [.folder]) }
-                            Button("游戏 ZIP") { choose(.games, types: [.zip]) }
-                            if store.platform == 98 { Button("DOS 游戏目录") { choose(.dos, types: [.folder]) }; Button("DOS 游戏 ZIP") { choose(.dos, types: [.zip]) } }
+                            Button("游戏文件夹") { choose(.games, types: [.folder]) }.accessibilityIdentifier("library.importFolder")
+                            Button("游戏 ZIP") { choose(.games, types: [.zip]) }.accessibilityIdentifier("library.importZip")
+                            if store.platform == 98 { Button("DOS 游戏目录") { choose(.dos, types: [.folder]) }.accessibilityIdentifier("library.importDOS"); Button("DOS 游戏 ZIP") { choose(.dos, types: [.zip]) } }
                         } label: { Label("添加游戏", systemImage: "plus") }
                             .accessibilityIdentifier("library.addGame").disabled(store.busy)
                     }
@@ -93,22 +124,39 @@ struct RootView: View {
             NavigationView { PlatformSettingsView(store: store, choose: choose) }.navigationViewStyle(.stack).tabItem { Label("设置", systemImage: "gearshape") }.tag(2)
         }
         .disabled(store.busy && store.player == nil)
-        .sheet(isPresented: $picker) { DocumentPicker(types: types, multiple: multiple) { urls in picker = false; if !urls.isEmpty { receive(urls) } } }
-        .sheet(isPresented: $naming) {
-            NavigationView { Form {
-                Text("已选择 \(pendingImages.count) 个文件").foregroundColor(.secondary)
-                TextField("游戏名称", text: $importName)
-                Button("添加到游戏库") { naming = false; store.importGames(pendingImages, name: importName); if store.platform == 88 { query88 = ""; filter88 = 0 } else { query98 = ""; filter98 = 0 } }
-                    .disabled(importName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || importName.count > 80)
-            }.navigationTitle("添加游戏").toolbar { Button("取消") { naming = false; pendingImages = [] } } }
+        .sheet(item: $sheet, onDismiss: didDismiss) { active in
+            sheetContent(active).disabled(store.busy).interactiveDismissDisabled(store.busy)
+                .alert("操作未完成", isPresented: errorPresented(inSheet: true)) { Button("知道了") { store.error = nil } } message: { Text(store.error ?? "") }
         }
-        .sheet(item: $store.dosDraft) { DOSWizard(store: store, draft: $0) }
-        .fullScreenCover(item: $store.player) { PlayerView(session: $0).id($0.id) }
-        .alert("操作未完成", isPresented: Binding(get: { store.error != nil && store.dosDraft == nil && store.player == nil && !picker && !naming }, set: { if !$0 { store.error = nil } })) { Button("知道了") { store.error = nil } } message: { Text(store.error ?? "") }
+        .fullScreenCover(item: $store.player) { PlayerView(session: $0).id($0.id).environmentObject(store) }
+        .alert("操作未完成", isPresented: errorPresented(inSheet: false)) { Button("知道了") { store.error = nil } } message: { Text(store.error ?? "") }
         .confirmationDialog("继续上次游戏？", isPresented: Binding(get: { resume != nil }, set: { if !$0 { resume = nil } }), titleVisibility: .visible) {
             if let game = resume { Button("继续游戏") { resume = nil; store.start(game, slot: 0) }; Button("重新启动") { resume = nil; store.start(game) } }
         }
     }
+    @ViewBuilder private func sheetContent(_ active: LibrarySheet) -> some View {
+        switch active {
+        case .picker(let request):
+            DocumentPicker(types: request.types, multiple: request.multiple) { urls in
+                if urls.isEmpty { sheet = nil } else { dismissThen { receive(urls, request: request) } }
+            }
+        case .naming(let request):
+            NavigationView { Form {
+                Text("已选择 \(request.urls.count) 个文件").foregroundColor(.secondary)
+                TextField("游戏名称", text: $importName).accessibilityIdentifier("library.importName")
+                Text("名称需为 1–80 个字符").font(.caption).foregroundColor(.secondary)
+                Button("添加到游戏库") {
+                    let name = importName
+                    dismissThen { store.importGames(request.urls, name: name, platform: request.platform) { _ in imported(request.platform) } }
+                }.accessibilityIdentifier("library.confirmImport")
+                    .disabled(importName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || importName.count > 80)
+            }.navigationTitle("添加游戏").toolbar { Button("取消") { sheet = nil } } }.navigationViewStyle(.stack)
+        case .dos(let draft): DOSWizard(store: store, draft: draft) { imported(98) }
+        case .share(let url): ShareView(url: url) { sheet = nil }
+        case .repair(let game): RepairNamesView(store: store, game: game)
+        }
+    }
+    private func imported(_ platform: Int) { if platform == 88 { query88 = ""; filter88 = 0 } else { query98 = ""; filter98 = 0 }; tab = 0 }
     private var query: String { (store.platform == 88 ? query88 : query98).trimmingCharacters(in: .whitespacesAndNewlines) }
     private var filter: Int { store.platform == 88 ? filter88 : filter98 }
     private var visible: [Game] { store.games.filter { game in (filter == 0 || game.mediaType == filter) && (query.isEmpty || game.name.localizedCaseInsensitiveContains(query) || game.media.contains { $0.name.localizedCaseInsensitiveContains(query) }) } }
@@ -130,7 +178,7 @@ struct RootView: View {
     private func gameRow(_ game: Game) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 11) {
-                NavigationLink { GameDetailView(store: store, initial: game, choose: choose) } label: {
+                NavigationLink { GameDetailView(store: store, initial: game, choose: choose, present: { sheet = $0 }) } label: {
                     HStack(spacing: 11) {
                         if let image = UIImage(contentsOfFile: store.files.directory(game).appendingPathComponent("cover.png").path) { Image(uiImage: image).resizable().scaledToFill().frame(width: 43, height: 43).clipped().cornerRadius(11) }
                         else { Image(systemName: game.mediaType == 1 ? "externaldrive" : "internaldrive").frame(width: 43, height: 43).background(necSurface).cornerRadius(11) }
@@ -138,23 +186,23 @@ struct RootView: View {
                     }
                 }.buttonStyle(.plain)
                 Button { start(game) } label: { Image(systemName: "play.fill").frame(width: 44, height: 44).background(necAccent.opacity(0.1)).clipShape(Circle()) }.accessibilityLabel("启动 \(game.name)")
-                NavigationLink { GameDetailView(store: store, initial: game, choose: choose) } label: { Image(systemName: "ellipsis").frame(width: 30, height: 44) }.accessibilityLabel("游戏管理")
+                NavigationLink { GameDetailView(store: store, initial: game, choose: choose, present: { sheet = $0 }) } label: { Image(systemName: "ellipsis").frame(width: 30, height: 44) }.accessibilityLabel("游戏管理")
             }.padding(.vertical, 10)
             Divider()
         }
     }
-    private func receive(_ urls: [URL]) {
-        let purpose = purpose, platform = store.platform
+    private func receive(_ urls: [URL], request: ImportRequest) {
+        let purpose = request.purpose, platform = request.platform
         switch purpose {
         case .games:
-            pendingImages = urls; importName = urls.first?.deletingPathExtension().lastPathComponent ?? ""
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { naming = !urls.isEmpty }
+            importName = urls.first?.deletingPathExtension().lastPathComponent ?? ""
+            sheet = .naming(GameImportRequest(urls: urls, platform: platform))
         case .dos:
-            guard let first = urls.first else { return }; store.perform("正在准备 DOS 目录…", operation: { let scoped = first.startAccessingSecurityScopedResource(); defer { if scoped { first.stopAccessingSecurityScopedResource() } }; return try store.files.stageDOS(first) }) { store.dosDraft = $0 }
+            guard !urls.isEmpty else { return }; store.perform("正在准备 DOS 目录…", operation: { try store.files.readingSelected(urls) { try store.files.stageDOS($0[0]) } }) { sheet = .dos($0) }
         default:
             store.perform("正在导入资源…", operation: {
-                for url in urls {
-                    let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                try store.files.readingSelected(urls) { selected in
+                for url in selected {
                     switch purpose {
                     case .resource(let game):
                         let effectivePlatform = game?.platform ?? platform
@@ -167,6 +215,7 @@ struct RootView: View {
                     case .template: try store.files.importTemplate(url)
                     default: break
                     }
+                }
                 }
             }) { _ in store.progress = "资源已导入，下次启动生效" }
         }
