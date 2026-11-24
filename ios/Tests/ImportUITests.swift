@@ -2,7 +2,14 @@ import XCTest
 
 final class ImportUITests: XCTestCase {
     private func pickerCancel(_ app: XCUIApplication) -> XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Cancel'")).firstMatch
+        let button = app.buttons["Cancel"].firstMatch
+        if button.exists { return button }
+        return app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Cancel'")).firstMatch
+    }
+    private func cancelPicker(_ app: XCUIApplication) {
+        let cancel = pickerCancel(app)
+        if cancel.isHittable { cancel.tap() }
+        else { cancel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap() }
     }
     private func openPicker(_ app: XCUIApplication, _ action: String = "选择多张磁盘镜像") {
         let button = app.buttons["library.addGame"]
@@ -45,7 +52,7 @@ final class ImportUITests: XCTestCase {
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "--import-ui-fixtures"]
         app.launch()
         XCTAssertTrue(app.buttons["PC-88"].waitForExistence(timeout: 10)); app.buttons["PC-88"].tap()
-        openPicker(app); record(app, "document-picker"); pickerCancel(app).tap()
+        openPicker(app); record(app, "document-picker"); cancelPicker(app)
         openPicker(app); choose(app, "UI-Disks")
         XCTAssertTrue(app.buttons["library.confirmImport"].waitForExistence(timeout: 15), app.debugDescription); record(app, "import-name")
         app.buttons["取消"].tap()
