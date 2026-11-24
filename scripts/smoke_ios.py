@@ -1,20 +1,23 @@
 """Run one simulator smoke session against both bundled emulator cores."""
 from pathlib import Path
 import json
+import os
 import subprocess
 import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-def run(*args): return subprocess.check_output(list(args), text=True).strip()
+def run(*args): return subprocess.check_output(list(args), text=True, timeout=45).strip()
 runtimes = json.loads(run('xcrun', 'simctl', 'list', 'runtimes', '-j'))['runtimes']
 runtime = next(item for item in reversed(runtimes) if item.get('isAvailable') and '.iOS-' in item['identifier'])
 available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '-j'))['devices'].get(runtime['identifier'], [])
 device_type = next((item['deviceTypeIdentifier'] for item in available if item['name'].startswith('iPhone') and item.get('deviceTypeIdentifier')), 'com.apple.CoreSimulator.SimDeviceType.iPhone-16')
-device = run('xcrun', 'simctl', 'create', 'NEC Mobile CI', device_type, runtime['identifier'])
+prepared = next((item for item in available if item['name'].startswith('iPhone')), None) if os.environ.get('GITHUB_ACTIONS') else None
+created = prepared is None
+device = run('xcrun', 'simctl', 'create', 'NEC Mobile CI', device_type, runtime['identifier']) if created else prepared['udid']
 try:
-    run('xcrun', 'simctl', 'boot', device)
-    subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True)
+    if not prepared or prepared['state'] != 'Booted': run('xcrun', 'simctl', 'boot', device)
+    subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True, timeout=180)
     app = ROOT / 'work/ios-simulator/Release-iphonesimulator/NECMobile.app'
     run('xcrun', 'simctl', 'install', device, str(app))
     initial_data = Path(run('xcrun', 'simctl', 'get_app_container', device, 'org.necmobile.ios', 'data'))
@@ -32,14 +35,18 @@ try:
         archive.writestr('disk.d88', header)
     result_bundle = ROOT / 'work/ios-import-ui.xcresult'
     with (ROOT / 'work/ios-import-ui.log').open('w', encoding='utf-8') as log:
-        check = subprocess.run(['xcodebuild', 'test', '-project', str(ROOT / 'work/ios-simulator/NECMobileApple.xcodeproj'),
+        try:
+            check = subprocess.run(['xcodebuild', 'test', '-project', str(ROOT / 'work/ios-simulator/NECMobileApple.xcodeproj'),
             '-scheme', 'NECMobile', '-configuration', 'Release', '-destination', 'id=' + device,
             '-resultBundlePath', str(result_bundle), '-parallel-testing-enabled', 'NO',
             '-only-testing:NECMobileImportUITests', 'CODE_SIGNING_ALLOWED=NO'],
-            stdout=log, stderr=subprocess.STDOUT)
+                stdout=log, stderr=subprocess.STDOUT, timeout=480)
+        except subprocess.TimeoutExpired:
+            print((ROOT / 'work/ios-import-ui.log').read_text(encoding='utf-8')[-14000:], flush=True)
+            raise SystemExit('UI check exceeded eight minutes; partial log retained.')
     if result_bundle.exists():
         subprocess.run(['xcrun', 'xcresulttool', 'export', 'attachments', '--path', str(result_bundle),
-                        '--output-path', str(ROOT / 'work/ios-import-ui')], check=False)
+                        '--output-path', str(ROOT / 'work/ios-import-ui')], check=False, timeout=45)
     if check.returncode:
         log = run('xcrun', 'simctl', 'spawn', device, 'log', 'show', '--last', '5m', '--style', 'compact', '--predicate', 'process == "NECMobile"')
         (ROOT / 'work/ios-runtime.log').write_text(log, encoding='utf-8')
@@ -85,5 +92,6 @@ try:
         (ROOT / 'work/ios-runtime.log').write_text(log, encoding='utf-8')
         raise SystemExit(1)
 finally:
-    subprocess.run(['xcrun', 'simctl', 'shutdown', device], check=False)
-    subprocess.run(['xcrun', 'simctl', 'delete', device], check=False)
+    for operation in ['shutdown', 'delete'] if created else ['shutdown']:
+        try: subprocess.run(['xcrun', 'simctl', operation, device], check=False, timeout=30)
+        except subprocess.TimeoutExpired: print('Simulator cleanup timed out: ' + operation, flush=True)
