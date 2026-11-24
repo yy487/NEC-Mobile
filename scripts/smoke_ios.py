@@ -34,7 +34,8 @@ try:
     with (ROOT / 'work/ios-import-ui.log').open('w', encoding='utf-8') as log:
         check = subprocess.run(['xcodebuild', 'test', '-project', str(ROOT / 'work/ios-simulator/NECMobileApple.xcodeproj'),
             '-scheme', 'NECMobile', '-configuration', 'Release', '-destination', 'id=' + device,
-            '-resultBundlePath', str(result_bundle), '-only-testing:NECMobileImportUITests', 'CODE_SIGNING_ALLOWED=NO'],
+            '-resultBundlePath', str(result_bundle), '-parallel-testing-enabled', 'NO',
+            '-only-testing:NECMobileImportUITests', 'CODE_SIGNING_ALLOWED=NO'],
             stdout=log, stderr=subprocess.STDOUT)
     if result_bundle.exists():
         subprocess.run(['xcrun', 'xcresulttool', 'export', 'attachments', '--path', str(result_bundle),
