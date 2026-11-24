@@ -1,12 +1,15 @@
 import XCTest
 
 final class ImportUITests: XCTestCase {
+    private func pickerCancel(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(NSPredicate(format: "label == 'Cancel'")).firstMatch
+    }
     private func openPicker(_ app: XCUIApplication, _ action: String = "选择多张磁盘镜像") {
         let button = app.buttons["library.addGame"]
         XCTAssertTrue(button.waitForExistence(timeout: 10)); button.tap()
         let choice = app.buttons[action]
         XCTAssertTrue(choice.waitForExistence(timeout: 5)); choice.tap()
-        XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 15))
+        XCTAssertTrue(pickerCancel(app).waitForExistence(timeout: 15))
     }
     private func choose(_ app: XCUIApplication, _ name: String) {
         let file = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + ".")).firstMatch
@@ -42,7 +45,7 @@ final class ImportUITests: XCTestCase {
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US", "--import-ui-fixtures"]
         app.launch()
         XCTAssertTrue(app.buttons["PC-88"].waitForExistence(timeout: 10)); app.buttons["PC-88"].tap()
-        openPicker(app); record(app, "document-picker"); app.buttons["Cancel"].tap()
+        openPicker(app); record(app, "document-picker"); pickerCancel(app).tap()
         openPicker(app); choose(app, "UI-Disks")
         XCTAssertTrue(app.buttons["library.confirmImport"].waitForExistence(timeout: 15), app.debugDescription); record(app, "import-name")
         app.buttons["取消"].tap()
