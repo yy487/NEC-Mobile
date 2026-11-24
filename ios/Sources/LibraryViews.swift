@@ -51,6 +51,7 @@ struct GameImportNameView: View {
     var body: some View {
         NavigationView { Form {
             Text("已选择 \(request.urls.count) 个文件").foregroundColor(.secondary)
+            ForEach(request.urls, id: \.self) { Text($0.lastPathComponent).font(.caption).foregroundColor(.secondary) }
             TextField("游戏名称", text: $name).accessibilityIdentifier("library.importName")
             Text("名称需为 1–80 个字符").font(.caption).foregroundColor(.secondary)
             Button("添加到游戏库") { submit(name) }.accessibilityIdentifier("library.confirmImport")

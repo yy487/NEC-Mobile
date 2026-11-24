@@ -132,7 +132,10 @@ final class LibraryFiles {
                 if allowed.contains(ext) {
                     let name = UUID().uuidString.lowercased() + "." + ext, target = destination.appendingPathComponent("media/\(name)")
                     try fileManager.copyItem(at: source, to: target); try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
-                    game.media.append(DiskImage(file: name, name: source.lastPathComponent, titles: try Binary.titles(target, platform: platform)))
+                    let titles: [String]
+                    do { titles = try Binary.titles(target, platform: platform) }
+                    catch { throw NECError(message: source.lastPathComponent + "：" + error.localizedDescription) }
+                    game.media.append(DiskImage(file: name, name: source.lastPathComponent, titles: titles))
                 } else if ["rom", "fnt", "bmp", "wav", "bin"].contains(ext) {
                     guard size <= 16 * 1024 * 1024 else { throw NECError(message: "单个固件、字库或 WAV 资源超过 16 MB") }
                     let name = source.lastPathComponent.lowercased(); guard !name.contains("\n"), name.utf8.count <= 96 else { throw NECError(message: "资源名称无效") }

@@ -18,10 +18,15 @@ final class ImportUITests: XCTestCase {
         XCTAssertTrue(choice.waitForExistence(timeout: 5)); choice.tap()
         XCTAssertTrue(pickerCancel(app).waitForExistence(timeout: 15))
     }
-    private func choose(_ app: XCUIApplication, _ name: String) {
+    private func choose(_ app: XCUIApplication, _ name: String, folder: Bool = false) {
         let file = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + ".")).firstMatch
         XCTAssertTrue(file.waitForExistence(timeout: 15), app.debugDescription)
         file.tap()
+        if folder {
+            let current = app.navigationBars.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", name, name + ",")).firstMatch
+            if !current.waitForExistence(timeout: 2) { file.doubleTap() }
+            XCTAssertTrue(current.waitForExistence(timeout: 5), app.debugDescription)
+        }
         let open = app.buttons["Open"].firstMatch
         if open.waitForExistence(timeout: 2) && open.isEnabled { open.tap() }
         else { let add = app.buttons["Add"].firstMatch; if add.exists && add.isEnabled { add.tap() } }
@@ -29,6 +34,7 @@ final class ImportUITests: XCTestCase {
     private func addSelected(_ app: XCUIApplication, _ title: String) {
         let confirm = app.buttons["library.confirmImport"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertEqual(app.textFields["library.importName"].value as? String, title)
         XCTAssertTrue(confirm.isEnabled); confirm.tap()
         XCTAssertTrue(app.staticTexts[title].firstMatch.waitForExistence(timeout: 20), app.debugDescription)
     }
@@ -59,7 +65,7 @@ final class ImportUITests: XCTestCase {
         openPicker(app); choose(app, "UI-Disks"); addSelected(app, "UI-Disks")
         record(app, "disk-imported")
         openPicker(app, "游戏 ZIP"); choose(app, "UI-Archive"); addSelected(app, "UI-Archive")
-        openPicker(app, "游戏文件夹"); choose(app, "UIFolder"); addSelected(app, "UIFolder")
+        openPicker(app, "游戏文件夹"); choose(app, "UIFolder", folder: true); addSelected(app, "UIFolder")
         openPicker(app); choose(app, "UI-Bad")
         XCTAssertTrue(app.buttons["library.confirmImport"].waitForExistence(timeout: 15)); app.buttons["library.confirmImport"].tap()
         XCTAssertTrue(app.alerts["操作未完成"].waitForExistence(timeout: 15)); record(app, "import-error"); app.buttons["知道了"].tap()
@@ -81,9 +87,9 @@ final class ImportUITests: XCTestCase {
         XCTAssertTrue(exit.waitForExistence(timeout: 5)); exit.tap()
         XCTAssertTrue(app.buttons["library.addGame"].waitForExistence(timeout: 20))
 
-        app.buttons["PC-98"].tap(); openPicker(app, "DOS 游戏目录"); choose(app, "UIDOS")
+        app.buttons["PC-98"].tap(); openPicker(app, "DOS 游戏目录"); choose(app, "UIDOS", folder: true)
         XCTAssertTrue(app.buttons["dos.commit"].waitForExistence(timeout: 20)); record(app, "dos-wizard"); app.buttons["取消"].tap()
-        openPicker(app, "DOS 游戏目录"); choose(app, "UIDOS")
+        openPicker(app, "DOS 游戏目录"); choose(app, "UIDOS", folder: true)
         XCTAssertTrue(app.buttons["dos.commit"].waitForExistence(timeout: 20))
         let commit = app.buttons["dos.commit"]
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: commit)], timeout: 20), .completed)
