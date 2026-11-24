@@ -24,9 +24,9 @@ created = prepared is None
 device = run('xcrun', 'simctl', 'create', 'NEC Mobile CI', device_type, runtime['identifier']) if created else prepared['udid']
 try:
     if not prepared or prepared['state'] != 'Booted': run('xcrun', 'simctl', 'boot', device)
-    subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True, timeout=180)
+    subprocess.run(['xcrun', 'simctl', 'bootstatus', device, '-b'], check=True, timeout=600)
     app = ROOT / 'work/ios-simulator/Release-iphonesimulator/NECMobile.app'
-    run('xcrun', 'simctl', 'install', device, str(app))
+    subprocess.run(['xcrun', 'simctl', 'install', device, str(app)], check=True, timeout=120)
     initial_data = Path(run('xcrun', 'simctl', 'get_app_container', device, 'org.necmobile.ios', 'data'))
     fixtures = initial_data / 'Documents/ImportUI'
     fixtures.mkdir(parents=True, exist_ok=True)
