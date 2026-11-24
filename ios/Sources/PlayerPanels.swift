@@ -15,7 +15,7 @@ struct StateSlotsView: View {
                     Button("读取此槽") { session.state(slot, load: true) }.disabled(!occupied)
                     Button("删除此槽", role: .destructive) { session.removeState(slot) }.disabled(!occupied)
                 } label: { Text(slots.label(slot)).font(.caption).frame(maxWidth: .infinity, minHeight: 64).padding(6).background(necSurface).cornerRadius(12) }
-                    .accessibilityIdentifier("state.slot.\(slot)")
+                    
             }
         }.padding() }.navigationTitle("即时存档 / 读档")
             .disabled(session.busy || library.busy)

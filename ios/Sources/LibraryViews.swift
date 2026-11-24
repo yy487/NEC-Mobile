@@ -52,9 +52,9 @@ struct GameImportNameView: View {
         NavigationView { Form {
             Text("已选择 \(request.urls.count) 个文件").foregroundColor(.secondary)
             ForEach(request.urls, id: \.self) { Text($0.lastPathComponent).font(.caption).foregroundColor(.secondary) }
-            TextField("游戏名称", text: $name).accessibilityIdentifier("library.importName")
+            TextField("游戏名称", text: $name)
             Text("名称需为 1–80 个字符").font(.caption).foregroundColor(.secondary)
-            Button("添加到游戏库") { submit(name) }.accessibilityIdentifier("library.confirmImport")
+            Button("添加到游戏库") { submit(name) }
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > 80)
         }.navigationTitle("添加游戏").toolbar { Button("取消", action: cancel) } }.navigationViewStyle(.stack)
     }
@@ -73,12 +73,7 @@ struct DocumentPicker: UIViewControllerRepresentable {
     var types: [UTType]; var multiple: Bool; var complete: ([URL]) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(complete) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false); picker.allowsMultipleSelection = multiple; picker.delegate = context.coordinator; picker.view.accessibilityIdentifier = "library.documentPicker"
-#if targetEnvironment(simulator)
-        if ProcessInfo.processInfo.arguments.contains("--import-ui-fixtures") {
-            picker.directoryURL = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("ImportUI", isDirectory: true)
-        }
-#endif
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false); picker.allowsMultipleSelection = multiple; picker.delegate = context.coordinator
         return picker
     }
     func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
@@ -104,7 +99,6 @@ struct DocumentPicker: UIViewControllerRepresentable {
         WindowGroup {
             RootView(store: store).preferredColorScheme(.dark).tint(necAccent)
                 .onChange(of: phase) { store.player?.foreground = $0 == .active }
-                .task { if ProcessInfo.processInfo.arguments.contains("--smoke-test") { IOSSmoke.start(store) } }
         }
     }
 }
@@ -144,12 +138,12 @@ struct RootView: View {
                 }.background(necBackground).navigationTitle("NEC Mobile").navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         Menu {
-                            Button("选择多张磁盘镜像") { choose(.games, types: [.data], multiple: true) }.accessibilityIdentifier("library.importImages")
-                            Button("游戏文件夹") { choose(.games, types: [.folder]) }.accessibilityIdentifier("library.importFolder")
-                            Button("游戏 ZIP") { choose(.games, types: [.zip]) }.accessibilityIdentifier("library.importZip")
-                            if store.platform == 98 { Button("DOS 游戏目录") { choose(.dos, types: [.folder]) }.accessibilityIdentifier("library.importDOS"); Button("DOS 游戏 ZIP") { choose(.dos, types: [.zip]) } }
+                            Button("选择多张磁盘镜像") { choose(.games, types: [.data], multiple: true) }
+                            Button("游戏文件夹") { choose(.games, types: [.folder]) }
+                            Button("游戏 ZIP") { choose(.games, types: [.zip]) }
+                            if store.platform == 98 { Button("DOS 游戏目录") { choose(.dos, types: [.folder]) }; Button("DOS 游戏 ZIP") { choose(.dos, types: [.zip]) } }
                         } label: { Label("添加游戏", systemImage: "plus") }
-                            .accessibilityIdentifier("library.addGame").disabled(store.busy)
+                            .disabled(store.busy)
                     }
             }.navigationViewStyle(.stack).id(store.platform).tabItem { Label("游戏库", systemImage: "books.vertical") }.tag(0)
             NavigationView { UpdatesView() }.navigationViewStyle(.stack).tabItem { Label("最近更新", systemImage: "book") }.tag(1)

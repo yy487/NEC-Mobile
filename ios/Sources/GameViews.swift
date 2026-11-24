@@ -16,11 +16,11 @@ struct GameDetailView: View {
         Form {
             Section { VStack(alignment: .leading, spacing: 6) { Text(game.name).font(.title2.bold()); Text("PC-\(game.platform) · \(game.mediaInfo)").font(.caption).foregroundColor(.secondary); Text("累计游玩 \(duration(game.playMillis))").font(.caption).foregroundColor(.secondary) } }
             Section("游戏配置") {
-                TextField("显示名称", text: $game.name).accessibilityIdentifier("game.name")
+                TextField("显示名称", text: $game.name)
                 if game.platform == 88 { Picker("机器模式", selection: $game.mode) { ForEach(Array(store.files.schema.modes.enumerated()), id: \.offset) { Text($0.element).tag($0.offset) } } }
                 else if let option = options.first(where: { $0.key == "np2kai_model" }) { OptionControl(option: option, game: $game) }
                 Toggle("静音", isOn: Binding(get: { game.options["output_volume"] == "0" }, set: { game.options["output_volume"] = $0 ? "0" : "100" }))
-                Button("保存配置") { store.save(game) { game = $0 } }.accessibilityIdentifier("game.save")
+                Button("保存配置") { store.save(game) { game = $0 } }
                 Button { store.save(game) { game = $0; store.start($0) } } label: { Label("启动", systemImage: "play.fill") }
             }
             Section("启动与机器") {
@@ -198,7 +198,7 @@ struct DOSWizard: View {
     var body: some View {
         NavigationView { Form {
             Section("建立 DOS 游戏硬盘") {
-                TextField("游戏名称", text: $name).accessibilityIdentifier("dos.name")
+                TextField("游戏名称", text: $name)
                 Picker("系统模板", selection: $templateID) { ForEach(templates) { Text($0.name).tag($0.id) } }.onChange(of: templateID) { _ in drive = selected?.drive ?? "A:"; initialization = selected?.autoexec ?? "" }
                 Picker("启动文件", selection: $entry) { ForEach(draft.programs, id: \.self) { Text($0).tag($0) } }.onChange(of: entry) { working = ($0 as NSString).deletingLastPathComponent }
                 DisclosureGroup("高级启动设置") { TextField("工作目录", text: $working).autocapitalization(.none); Picker("DOS 盘符", selection: $drive) { ForEach(["A:", "B:", "C:", "D:", "E:", "F:"], id: \.self) { Text($0).tag($0) } }; TextEditor(text: $initialization).frame(minHeight: 120) }
@@ -207,7 +207,7 @@ struct DOSWizard: View {
                     var value = draft; value.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
                     let command = entry, directory = working, letter = drive, setup = initialization
                     store.perform("正在建立游戏硬盘…", operation: { try store.files.commitDOS(value, template: selected, entry: command, working: directory, drive: letter, initialization: setup) }) { _ in imported(); presentation.wrappedValue.dismiss() }
-                }.accessibilityIdentifier("dos.commit").disabled(selected == nil || entry.isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > 80)
+                }.disabled(selected == nil || entry.isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || name.count > 80)
             }.disabled(store.busy)
             if store.busy { ProgressView(store.progress) }
         }.navigationTitle("DOS 目录导入").toolbar { Button("取消") { presentation.wrappedValue.dismiss() }.disabled(store.busy) } }

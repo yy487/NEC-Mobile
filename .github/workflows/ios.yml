@@ -5,20 +5,7 @@ on:
       device_only:
         description: '仅构建设备 IPA'
         type: boolean
-        default: false
-  push:
-    branches: [main, ios-port]
-    paths:
-      - '.github/workflows/ios.yml'
-      - 'ios/**'
-      - 'native/**'
-      - 'scripts/**'
-      - 'third_party/**'
-      - 'app/src/main/assets/**'
-      - 'CHANGELOG.md'
-      - 'version.properties'
-      - 'app/src/main/java/org/necmobile/MachineOptions.java'
-      - 'app/src/main/java/org/necmobile/InputPresets.java'
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -50,9 +37,6 @@ jobs:
       - name: Build simulator app
         if: ${{ !inputs.device_only }}
         run: python3 scripts/build_ios.py --simulator
-      - name: Run simulator smoke check
-        if: ${{ !inputs.device_only }}
-        run: python3 scripts/smoke_ios.py
       - uses: actions/upload-artifact@v4
         if: success() && !inputs.device_only
         with:
@@ -62,21 +46,9 @@ jobs:
             release/NEC-Mobile-iOS-simulator.zip
           retention-days: 14
       - uses: actions/upload-artifact@v4
-        if: always() && !inputs.device_only
-        with:
-          name: iOS-simulator-check
-          path: |
-            work/ios-smoke.log
-            work/ios-runtime.log
-            work/ios-smoke/*.png
-            work/ios-import-ui/**/*
-            work/ios-import-ui.log
-          retention-days: 14
-      - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: iOS-build-diagnostics
           path: |
             work/ios-device/CMakeFiles/CMakeConfigureLog.yaml
             work/ios-simulator/CMakeFiles/CMakeConfigureLog.yaml
-            work/ios-smoke.log

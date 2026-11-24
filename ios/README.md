@@ -4,14 +4,12 @@ iOS 15 或更新系统，ARM64 设备。PC-88 使用 M88，PC-98 使用 NP2kai�
 
 ## 云端构建
 
-GitHub Actions 的 **iOS build** 工作流使用 macOS 和 Xcode。`main` 与 `ios-port` 分支的相关改动自动触发构建，工作流也提供手动运行入口。
+GitHub Actions 的 **iOS build** 工作流使用 macOS 和 Xcode。手动运行后默认构建设备 IPA；取消“仅构建设备 IPA”可同时生成模拟器 App。
 
-构建产物位于该次运行的 **Artifacts → NEC-Mobile-iOS**。
+设备安装包位于该次运行的 **Artifacts → NEC-Mobile-iOS-device**；选择构建模拟器时，还会提供 **NEC-Mobile-iOS**。
 
 - `NEC-Mobile-iOS-unsigned.ipa` 用于设备持有人进行个人签名后安装。
 - `NEC-Mobile-iOS-simulator.zip` 包含模拟器 App。
-
-运行详情中的 **Run simulator smoke check** 会通过真实游玩会话检查导入、画面、压缩即时档、退盘装盘、后台保存、时长与继续游戏；**iOS-simulator-check** 产物保留界面截图和结果。
 
 ## Windows 朋友测试
 
@@ -44,7 +42,6 @@ ROM、字库和 OPNA 节奏 WAV 可全局或按游戏导入。FREECG98.BMP 使�
 ```sh
 python3 scripts/build_ios.py
 python3 scripts/build_ios.py --simulator
-python3 scripts/smoke_ios.py
 ```
 
 应用和内核资源沿用项目许可。许可文件位于应用“设置 → 来源与许可”。内置 FreeDOS(98) 对应源码位于仓库 third_party/freedos98。
