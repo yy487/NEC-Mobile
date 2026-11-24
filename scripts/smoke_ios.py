@@ -9,7 +9,14 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 def run(*args): return subprocess.check_output(list(args), text=True, timeout=45).strip()
 runtimes = json.loads(run('xcrun', 'simctl', 'list', 'runtimes', '-j'))['runtimes']
-runtime = next(item for item in reversed(runtimes) if item.get('isAvailable') and '.iOS-' in item['identifier'])
+sdk_version = run('xcrun', '--sdk', 'iphonesimulator', '--show-sdk-version')
+sdk = tuple(int(value) for value in sdk_version.split('.')[:2])
+compatible = [item for item in runtimes if item.get('isAvailable') and '.iOS-' in item['identifier']
+              and int(item['version'].split('.')[0]) == sdk[0]
+              and tuple(int(value) for value in item['version'].split('.')[:2]) <= sdk]
+if not compatible: raise SystemExit('No iOS simulator runtime matching active SDK ' + sdk_version)
+runtime = max(compatible, key=lambda item: tuple(int(value) for value in item['version'].split('.')))
+print('Testing iOS ' + runtime['version'] + ' with simulator SDK ' + sdk_version, flush=True)
 available = json.loads(run('xcrun', 'simctl', 'list', 'devices', 'available', '-j'))['devices'].get(runtime['identifier'], [])
 device_type = next((item['deviceTypeIdentifier'] for item in available if item['name'].startswith('iPhone') and item.get('deviceTypeIdentifier')), 'com.apple.CoreSimulator.SimDeviceType.iPhone-16')
 prepared = next((item for item in available if item['name'].startswith('iPhone')), None) if os.environ.get('GITHUB_ACTIONS') else None
