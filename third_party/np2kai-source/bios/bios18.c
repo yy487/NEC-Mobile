@@ -251,6 +251,7 @@ const UINT8	*p;
 		case 0x29:			// 8x16 KANJI
 		case 0x2a:
 		case 0x2b:
+			if (!font_cg_halfwidth((UINT16)(((code & 0x7f) << 8) | ((code >> 8) - 0x20)))) goto fullwidth_font;
 			size = 0x0102;
 			MEMR_WRITE16(seg, off, 0x0102);
 			p = fontrom;
@@ -266,6 +267,7 @@ const UINT8	*p;
 			break;
 
 		default:
+		fullwidth_font:
 			size = 0x0202;
 			p = fontrom;
 			p += (code & 0x7f) << 12;

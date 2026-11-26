@@ -9,11 +9,15 @@
 #include "pc88/sound.h"
 #include "pc88/opnif.h"
 #include "pc88/beep.h"
+#include "pc88/memory.h"
+#include "pc88/subsys.h"
 #include "pc88/mouse.h"
 #include "mouse_input.h"
 #include "error.h"
 #include "file.h"
 #include <array>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <unistd.h>
 
@@ -332,7 +336,23 @@ static bool loadState(const char* path) {
     keyboard->rows.fill(255); sampleRemainder=0;
     return restored && audioRestored;
 }
+static size_t memory(NecMemoryRegion* regions, size_t capacity) {
+    if (!machine) return 0;
+    auto* main = machine->GetMem1();
+    size_t banks = main->GetERAMBanks(), count = banks + 2;
+    if (!regions || capacity < count) return count;
+    std::memset(regions, 0, count * sizeof(*regions));
+    regions[0].id = 0; regions[0].data = main->GetRAM(); regions[0].size = 0x10000;
+    std::snprintf(regions[0].name, sizeof(regions[0].name), "PC-88 Main RAM");
+    regions[1].id = 1; regions[1].data = machine->GetMem2()->GetRAM(); regions[1].address = 0x4000; regions[1].size = 0x4000;
+    std::snprintf(regions[1].name, sizeof(regions[1].name), "PC-88 Disk CPU RAM");
+    for (size_t i = 0; i < banks; ++i) {
+        regions[i+2].id = uint32_t(0x100 + i); regions[i+2].data = main->GetERAM(uint(i)); regions[i+2].size = 0x8000;
+        std::snprintf(regions[i+2].name, sizeof(regions[i+2].name), "PC-88 RAM Bank %zu", i);
+    }
+    return count;
+}
 extern "C" const NecCore* nec_core() {
-    static const NecCore api{"M88 C++ / PC-8801", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, nullptr, mouseReads};
+    static const NecCore api{"M88 C++ / PC-8801", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, nullptr, mouseReads, memory};
     return &api;
 }

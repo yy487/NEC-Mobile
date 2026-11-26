@@ -350,12 +350,19 @@ public final class MainActivity extends ComponentActivity {
         }
     }
     private void storage() {
-        perform("正在统计应用文件…", () -> AppStorage.inspect(this), ui::showStorage);
+        storage("");
+    }
+    private void storage(String message) {
+        perform("正在统计应用文件…", () -> AppStorage.inspect(this), usage -> ui.showStorage(usage, message));
     }
     void cleanStorage() {
         perform("正在清理残留…", () -> AppStorage.clean(this), removed -> {
-            setProgress("已释放 " + android.text.format.Formatter.formatFileSize(this, removed));
-            storage();
+            storage("已释放 " + android.text.format.Formatter.formatFileSize(this, removed));
+        });
+    }
+    void compressStates() {
+        perform("正在压缩已有即时档…", () -> AppStorage.compressStates(this), removed -> {
+            storage("即时档压缩完成，已释放 " + android.text.format.Formatter.formatFileSize(this, removed));
         });
     }
     void chooseDosTemplate() { chooseFile(70, false); }

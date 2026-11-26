@@ -31,6 +31,7 @@ static void (*configureMidi)(bool);
 static void (*configureSoundBios)(bool);
 static const char* (*soundRomName)();
 static const char* (*fontResource)();
+static size_t (*memoryRegions)(NecMemoryRegion*, size_t);
 static unsigned (*readMouseCounter)();
 static void (*configureMedia)(const char*, const char*, bool);
 static void (*completeMedia)();
@@ -198,6 +199,7 @@ static void closeCore() {
     saveMachine = checkMachine = loadMachine = nullptr; configureMidi = nullptr; configureSoundBios = nullptr; soundRomName = nullptr;
     completeMedia = nullptr; floppyPath = nullptr;
     fontResource = nullptr;
+    memoryRegions = nullptr;
     readMouseCounter = nullptr;
     configureMedia = nullptr;
     loaded = initialized = false;
@@ -246,6 +248,7 @@ static bool openCore(const char* directory, const char* disk, const char* second
     configureSoundBios = reinterpret_cast<decltype(configureSoundBios)>(dlsym(library,"necmobile_configure_sound_bios"));
     soundRomName = reinterpret_cast<decltype(soundRomName)>(dlsym(library,"necmobile_sound_rom"));
     fontResource = reinterpret_cast<decltype(fontResource)>(dlsym(library,"necmobile_font_resource"));
+    memoryRegions = reinterpret_cast<decltype(memoryRegions)>(dlsym(library,"necmobile_memory_regions"));
     readMouseCounter = reinterpret_cast<decltype(readMouseCounter)>(dlsym(library,"necmobile_mouse_read_count"));
     configureMedia = reinterpret_cast<decltype(configureMedia)>(dlsym(library,"necmobile_configure_media"));
     completeMedia = reinterpret_cast<decltype(completeMedia)>(dlsym(library,"necmobile_complete_media"));
@@ -349,7 +352,10 @@ static bool loadState(const char* path) {
     variablesChanged = true;
     return true;
 }
+static size_t memory(NecMemoryRegion* regions, size_t capacity) {
+    return memoryRegions ? memoryRegions(regions, capacity) : 0;
+}
 extern "C" const NecCore* nec_core() {
-    static const NecCore api{"NP2kai / PC-98", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, diskPath, mouseReads};
+    static const NecCore api{"NP2kai / PC-98", openCore, frame, key, mouse, mount, flush, reset, closeCore, fps, enableMouse, saveState, checkState, loadState, diskPath, mouseReads, memory};
     return &api;
 }

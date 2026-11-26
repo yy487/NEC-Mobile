@@ -4,10 +4,10 @@
 
 Play PC-88 and PC-98 games on Android. NEC Mobile brings the M88 PC-88 core and the NP2kai PC-98 core into one app, with separate game libraries, resources, and machine settings for each platform.
 
-Version **0.26.8**, for **ARM64 devices running Android 8.0 or later**.
+Version **0.26.9**, for **ARM64 devices running Android 8.0 or later**.
 
-- Android APK `NEC-Mobile-0.26.8-arm64.apk`
-- Source archive `NEC-Mobile-0.26.8-sources.zip`
+- Android APK `NEC-Mobile-0.26.9-arm64.apk`
+- Source archive `NEC-Mobile-0.26.9-sources.zip`
 
 ## Features
 
@@ -72,7 +72,9 @@ The list contains floppy disks imported for that game. For a D88 file containing
 
 ## Saves and progress
 
-Open **菜单 → 即时存档 / 读档** to access six slots. Select a slot to save, load, or delete a state. You can load an existing state after starting the game again.
+Open **菜单 → 即时存档 / 读档** to manage six manual slots, the quick slot, and the automatic session slot. You can load an existing state after starting the game again.
+
+Manual, quick, and automatic states use fast streaming compression. Older states remain readable and are compressed after a successful load. After exiting the game, use **设置 → 数据占用与清理 → 压缩已有即时档** to compress existing slots and see the space reclaimed. Compressed states require version 0.26.9 or later. Saving and loading briefly use uncompressed temporary files, which are removed when the operation finishes.
 
 A save state contains the CPU, memory, device state, mounted disk selection, and MIDI channels. Loading a state combines the restored machine state with the disks' current contents. The game's own save function writes progress to the disk copies.
 
@@ -81,6 +83,8 @@ Loading a state restores its disk selection. A different machine or hard-disk en
 To keep in-game saves, export the relevant disk through **管理 → 管理磁盘文件 → 导出磁盘副本**. Removing a game or uninstalling the app deletes its app-managed disks and save states.
 
 Use **快存** and **快读** on the tool ball to overwrite or load the game's independent quick slot directly.
+
+Open **数值修改器** from the in-game menu to pause and search game RAM. Play until a value changes, then narrow the results by its new value, increase, decrease, change, or no change. The editor supports 8/16/32-bit signed and unsigned integers, packed BCD, ranges, exact changes, writes, undo, and value locks. Named entries and manually entered addresses are saved per game; PC-88 expansion banks remain separate. Loading a state, resetting, or restarting stops locks. Search snapshots stay in memory, while edited values may be included in in-game saves.
 
 Backgrounding and normal exit automatically save the session. The next **启动** asks whether to resume or restart. Resume restores the machine and mounted media, while restart boots with the default media.
 
@@ -102,6 +106,8 @@ Speed settings are 50%, 100%, 150%, and 200%; audio pitch follows speed. Full-sp
 **设置 → 手机音频输出** sets the shared output rate and buffer for subsequent launches. **更多设置 → 实际音频输出** in the player shows the active route and actual AAudio parameters. Core PCM is resampled to the output rate.
 
 Select or import PC-98 fonts through **游戏管理 → 字库设置 · FREECG98.BMP**. Imports are selected immediately for the next launch. Priority is manual choice, game package, global import, then bundled font. Within each source, FREECG98.BMP and FONT.BMP take priority over FONT.ROM. Supported BMP files are uncompressed 2048×2048 1-bit images; the app prepares a runtime copy and preserves the original. The last-start information shows the format accepted by the core.
+
+Companion BMP fonts can use extended Shift_JIS codes and full-width punctuation in half-width banks. The core adapts recognized font conversion routines automatically, without changing disk images.
 
 If Japanese disk names were decoded as GBK during extraction, **游戏管理 → 修复磁盘名称编码** previews their recovery from Shift_JIS bytes. It updates display labels without reimporting the disks.
 

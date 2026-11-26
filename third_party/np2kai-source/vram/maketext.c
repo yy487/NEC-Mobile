@@ -290,7 +290,7 @@ void maketext(int text_renewal) {
 						}
 						else {
 							gaiji1st = 0;
-							if ((kc < 0x09) || (kc >= 0x0c)) {
+							if (!font_cg_halfwidth((UINT16)(bitmap[x] >> 4))) {
 								kanji2nd = TRUE;
 							}
 						}
@@ -603,7 +603,7 @@ void maketext40(int text_renewal) {
 						}
 						else {
 							gaiji1st = 0;
-							if ((kc < 0x09) || (kc >= 0x0c)) {
+							if (!font_cg_halfwidth((UINT16)(bitmap[x] >> 4))) {
 								kanji2nd = TRUE;
 							}
 						}

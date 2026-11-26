@@ -16,6 +16,101 @@
 #include	"fontmake.h"
 #include	<codecnv/codecnv.h>
 #include	"io/cgrom.h"
+#if defined(__LIBRETRO__) && defined(CPUCORE_IA32)
+#include <ia32/instructions/bin_arith.h>
+#include <ia32/instructions/ctrl_trans.h>
+#endif
+
+#if defined(__LIBRETRO__)
+extern int necmobile_font_kind;
+#endif
+
+BOOL font_cg_halfwidth(UINT16 code) {
+
+	UINT row = code & 0x7f;
+	if (row < 0x09 || row >= 0x0c) return FALSE;
+#if defined(__LIBRETRO__)
+	if (necmobile_font_kind == 1) {
+		const UINT8 *right = fontrom + ((code & 0x7f7f) << 4) + 0x800;
+		UINT line;
+		/* Translated BMP fonts also put full-width punctuation in this bank. */
+		for (line = 0; line < 16; line++) if (right[line]) return FALSE;
+	}
+#endif
+	return TRUE;
+}
+
+#if defined(__LIBRETRO__) && defined(CPUCORE_IA32)
+static const UINT8 font_sjis_decoder[] = {
+	0x80,0xec,0x70,0x80,0xfc,0x30,0x72,0x03,0x80,0xec,0x40,
+	0xd0,0xe4,0xfe,0xcc,0xb2,0x1f,0x22,0xc0,0x79,0x0a,
+	0xfe,0xc8,0x3c,0x9e,0x72,0x04,0xb2,0x7d,0xfe,0xc4,
+	0x2a,0xc2,0xc3
+};
+
+static BOOL font_sjis_extended(UINT16 sjis, UINT16 *jis) {
+	UINT lead = sjis >> 8, trail = sjis & 0xff, index, row, cell, line;
+	const UINT8 *glyph;
+	if (necmobile_font_kind != 1) return FALSE;
+	if (!((lead >= 0x8a && lead <= 0x9f) || (lead >= 0xe0 && lead <= 0xef))) return FALSE;
+	if (trail == 0x7f) index = 0;
+	else if (trail >= 0xfd) index = trail - 0xfc;
+	else return FALSE;
+	/* The BMP extension table uses 94 cells per bank, after JIS 0x727e. */
+	index += (lead < 0xa0 ? lead - 0x82 : lead - 0xc2) * 4;
+	if (index < 0x21) return FALSE;
+	index -= 0x21;
+	row = 0x53 + index / 94;
+	cell = 0x21 + index % 94;
+	if (row >= 0x56) return FALSE;
+	glyph = fontrom + (cell << 12) + (row << 4);
+	for (line = 0; line < 16; line++) if (glyph[line] || glyph[0x800 + line]) {
+		*jis = (UINT16)(((row + 0x20) << 8) | cell);
+		return TRUE;
+	}
+	return FALSE;
+}
+#endif
+
+void font_cg_probe(void) {
+#if defined(__LIBRETRO__) && defined(CPUCORE_IA32)
+	UINT32 base = (UINT32)CPU_CS << 4, ip = CPU_IP, target;
+	static const UINT8 font_read[] = {0x2d,0x00,0x20,0xe6,0xa1};
+	if (necmobile_font_kind != 1 || (CPU_STAT_PM && !CPU_STAT_VM86)) return;
+	if (ip < 8 || base + ip >= 0xa0000) return;
+	if (mem[base + ip - 8] != 0xe8 || memcmp(mem + base + ip - 5, font_read, sizeof(font_read))) return;
+	target = (ip - 5 + (SINT16)LOADINTELWORD(mem + base + ip - 7)) & 0xffff;
+	if (target + sizeof(font_sjis_decoder) > 0x10000 || base + target + sizeof(font_sjis_decoder) > 0xa0000) return;
+	if (!memcmp(mem + base + target, font_sjis_decoder, sizeof(font_sjis_decoder))) {
+		/* Trap before conversion: 0x7f and 0x80 would otherwise become identical. */
+		mem[base + target] = 0xcc;
+	}
+#endif
+}
+
+BOOL font_cg_trap(void) {
+#if defined(__LIBRETRO__) && defined(CPUCORE_IA32)
+	UINT32 base = (UINT32)CPU_CS << 4, ip = CPU_IP, target;
+	UINT16 jis, ret;
+	static const UINT8 font_read[] = {0x2d,0x00,0x20,0xe6,0xa1};
+	if ((CPU_STAT_PM && !CPU_STAT_VM86) || !ip) return FALSE;
+	target = base + ip - 1;
+	if (ip - 1 + sizeof(font_sjis_decoder) > 0x10000 || target + sizeof(font_sjis_decoder) > 0xa0000) return FALSE;
+	if (mem[target] != 0xcc || memcmp(mem + target + 1, font_sjis_decoder + 1, sizeof(font_sjis_decoder) - 1)) return FALSE;
+	ret = cpu_vmemoryread_w(CPU_SS_INDEX, CPU_SP);
+	if (ret <= 0xfffb && base + ret + sizeof(font_read) <= 0xa0000 &&
+		!memcmp(mem + base + ret, font_read, sizeof(font_read)) && font_sjis_extended(CPU_AX, &jis)) {
+		CPU_AX = jis;
+		RETnear16();
+	} else {
+		/* Keep the original instruction, flags and decoder for ordinary text. */
+		SUB_EbIb(&CPU_AH, 0x70);
+		CPU_EIP = (CPU_IP + 2) & 0xffff;
+	}
+	return TRUE;
+#endif
+	return FALSE;
+}
 
 #ifndef FONTMEMORYBIND
 	UINT8	__font[FONTMEMORYSIZE];
@@ -164,6 +259,9 @@ const UINT8	*p;
 	}
 
 	loading = 0xff;
+#if defined(__LIBRETRO__)
+	necmobile_font_kind = 0;
+#endif
 	switch(type) {
 		case FONTTYPE_PC98:
 			loading = fontpc98_read(fname, loading);

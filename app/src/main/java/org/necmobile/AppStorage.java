@@ -8,7 +8,7 @@ import java.util.*;
 
 final class AppStorage {
     static final class Usage {
-        long disks, states, resources, temporary, other, cache;
+        long disks, states, resources, temporary, other, cache, uncompressedStates;
         String describe(Context context) {
             return "游戏磁盘  " + size(context, disks) + "\n即时存档  " + size(context, states)
                     + "\n字库、音源与系统模板  " + size(context, resources)
@@ -27,7 +27,9 @@ final class AppStorage {
             for (GameLibrary.Game game : library.list()) {
                 ids.add(game.id);
                 File directory = library.directory(game);
-                result.addAll(new StateSlots(directory).unused());
+                StateSlots slots = new StateSlots(directory);
+                result.addAll(slots.unused());
+                result.addAll(slots.temporaryFiles());
                 if (game.kind.equals("dos-directory") && game.disk("dos-game.hdi") != null && game.disk("dos-game.hdi").file.isFile()) {
                     result.add(new File(directory, "dos-source"));
                     result.add(new File(directory, "import.zip"));
@@ -48,6 +50,10 @@ final class AppStorage {
         result.other += bytes(new File(context.getApplicationInfo().dataDir, "shared_prefs"));
         result.other += bytes(new File(context.getApplicationInfo().dataDir, "databases"));
         result.cache = bytes(context.getCacheDir()) + bytes(context.getCodeCacheDir());
+        for (int platform : new int[]{88, 98}) {
+            GameLibrary library = new GameLibrary(context, platform);
+            for (GameLibrary.Game game : library.list()) result.uncompressedStates += new StateSlots(library.directory(game)).uncompressedBytes();
+        }
         return result;
     }
     private static void scan(File file, List<File> temporary, Usage usage) throws IOException {
@@ -72,10 +78,7 @@ final class AppStorage {
         return total;
     }
     static long clean(Context context) throws Exception {
-        android.app.ActivityManager manager = (android.app.ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
-        List<android.app.ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
-        if (processes != null && processes.stream().anyMatch(process -> process.processName.equals(context.getPackageName() + ":emulation")))
-            throw new IOException("请先退出正在运行的游戏，再清理数据");
+        requireStopped(context);
         long removed = 0;
         File allowed = context.getFilesDir().getCanonicalFile();
         for (File file : temporary(context)) {
@@ -84,6 +87,21 @@ final class AppStorage {
             removed += Math.max(0, before - bytes(file));
         }
         return removed;
+    }
+    static long compressStates(Context context) throws Exception {
+        requireStopped(context);
+        long removed = 0;
+        for (int platform : new int[]{88, 98}) {
+            GameLibrary library = new GameLibrary(context, platform);
+            for (GameLibrary.Game game : library.list()) removed += new StateSlots(library.directory(game)).compressExisting();
+        }
+        return removed;
+    }
+    private static void requireStopped(Context context) throws IOException {
+        android.app.ActivityManager manager = (android.app.ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
+        List<android.app.ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
+        if (processes != null && processes.stream().anyMatch(process -> process.processName.equals(context.getPackageName() + ":emulation")))
+            throw new IOException("请先退出正在运行的游戏，再整理存储数据");
     }
     private static void remove(File file, File allowed) throws IOException {
         File actual = file.getCanonicalFile();

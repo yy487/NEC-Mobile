@@ -66,6 +66,7 @@ internal class LibraryUi(private val activity: MainActivity) {
     private var imageNames by mutableStateOf<List<String>>(emptyList())
     private var importName by mutableStateOf("")
     private var storageUsage by mutableStateOf<AppStorage.Usage?>(null)
+    private var storageMessage by mutableStateOf("")
     private var importRevision by mutableIntStateOf(0)
 
     fun changed() { revision++ }
@@ -85,7 +86,7 @@ internal class LibraryUi(private val activity: MainActivity) {
         if (importName.isBlank()) importName = names.firstOrNull()?.substringBeforeLast('.') ?: ""
     }
     fun importFinished() { importOpen = false; imageNames = emptyList(); importRevision++ }
-    fun showStorage(usage: AppStorage.Usage) { storageUsage = usage }
+    fun showStorage(usage: AppStorage.Usage, message: String) { storageUsage = usage; storageMessage = message }
     fun openLaunch(game: GameLibrary.Game, defaults: Boolean) {
         launchError = ""; defaultsOnly = defaults; launching = false; launchGame = game
     }
@@ -183,7 +184,12 @@ internal class LibraryUi(private val activity: MainActivity) {
         }
         storageUsage?.let { usage ->
             Sheet("数据占用 · PC-88 与 PC-98", { storageUsage = null }) {
+                if (storageMessage.isNotEmpty()) Text(storageMessage, color = LibraryAccent)
                 Text(usage.describe(activity))
+                if (usage.uncompressedStates > 0) {
+                    Text("未压缩的即时档 ${android.text.format.Formatter.formatFileSize(activity, usage.uncompressedStates)}", color = LibraryMuted, style = MaterialTheme.typography.bodySmall)
+                    Button(shape = RoundedCornerShape(12.dp), onClick = { storageUsage = null; activity.compressStates() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("压缩已有即时档") }
+                }
                 Text("导入游戏后，应用保留独立可写磁盘。清理可移除已转入 HDI 的源目录、中断导入和失去槽位引用的存档文件。", color = LibraryMuted, style = MaterialTheme.typography.bodySmall)
                 if (usage.temporary > 0) Button(shape = RoundedCornerShape(12.dp), onClick = { storageUsage = null; activity.cleanStorage() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("清理残留") }
             }

@@ -54,6 +54,7 @@ public:
 	void ApplyConfig(const Config* cfg);
 	uint8* GetRAM() { return ram; }
 	uint8* GetERAM( uint bank ) { return ((bank < erambanks) ? &eram[bank * 0x8000] : ram); }
+	uint GetERAMBanks() const { return erambanks; }
 	uint8* GetTVRAM() { return tvram; }
 	quadbyte* GetGVRAM() { return gvram; }
 	uint8* GetROM() { return rom; }

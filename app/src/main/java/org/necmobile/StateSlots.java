@@ -5,11 +5,16 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.text.DateFormat;
 import java.util.*;
+import java.util.zip.Deflater;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 final class StateSlots {
     static final int COUNT=6;
     static final int AUTO=0;
     static final int QUICK=COUNT+1;
+    // Current machines expose at most 120 MB RAM plus device state.
+    private static final long MACHINE_LIMIT = 512L * 1024 * 1024;
     private final File root;
     StateSlots(File gameDirectory) { root=new File(gameDirectory,"states"); }
     private AtomicFile pointer(int slot) {
@@ -119,6 +124,7 @@ final class StateSlots {
         try {
             String result=Native.state(fresh.getAbsolutePath(),false);
             if (!result.isEmpty()) throw new IOException(translate(result));
+            compressMachine(fresh);
             AtomicFile storage=pointer(slot); FileOutputStream out=storage.startWrite();
             try {
                 out.write((fresh.getName()+"\n"+System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8)); storage.finishWrite(out);
@@ -129,9 +135,81 @@ final class StateSlots {
     }
     void load(int slot) throws Exception {
         File selected=folder(slot); if (selected==null) throw new IOException("此槽没有存档");
-        String result=Native.state(selected.getAbsolutePath(),true);
+        File expanded = null;
+        String result;
+        try {
+            File source = selected;
+            if (new File(selected, "machine.bin.gz").isFile()) {
+                expanded = new File(root, "load-" + UUID.randomUUID());
+                if (!expanded.mkdir()) throw new IOException("无法创建读档临时目录");
+                for (String name : new String[]{"host.bin", "midi.bin"}) {
+                    try (InputStream input = new FileInputStream(new File(selected, name));
+                         OutputStream output = new FileOutputStream(new File(expanded, name))) {
+                        Library.copy(input, output, MACHINE_LIMIT);
+                    }
+                }
+                try (InputStream compressed = new FileInputStream(new File(selected, "machine.bin.gz"));
+                     InputStream input = new GZIPInputStream(compressed, 65536);
+                     OutputStream output = new FileOutputStream(new File(expanded, "machine.bin"))) {
+                    Library.copy(input, output, MACHINE_LIMIT);
+                }
+                source = expanded;
+            }
+            result = Native.state(source.getAbsolutePath(), true);
+        } catch (IOException error) {
+            throw new IOException("压缩存档读取失败，请检查剩余空间和存档文件。", error);
+        } finally { if (expanded != null) clean(expanded); }
         if (result.equals("State machine settings do not match; restore the saved settings first")) throw new RestartRequired();
         if (!result.isEmpty()) throw new IOException(translate(result));
+        try { compressMachine(selected); }
+        catch (IOException error) { android.util.Log.w("NECMobile", "Loaded state could not be compressed", error); }
+    }
+    private long compressMachine(File folder) throws IOException {
+        File raw = new File(folder, "machine.bin");
+        if (!raw.isFile()) return 0;
+        long before = AppStorage.bytes(folder);
+        File temporary = File.createTempFile("pack-", ".pending", root);
+        try {
+            try (InputStream input = new FileInputStream(raw);
+                 FileOutputStream output = new FileOutputStream(temporary);
+                 GZIPOutputStream packed = new GZIPOutputStream(output, 65536) {
+                     { def.setLevel(Deflater.BEST_SPEED); }
+                 }) {
+                Library.copy(input, packed, MACHINE_LIMIT);
+                packed.finish(); output.getFD().sync();
+            }
+            android.system.Os.rename(temporary.getAbsolutePath(), new File(folder, "machine.bin.gz").getAbsolutePath());
+            if (!raw.delete()) throw new IOException("存档已压缩，原始临时副本暂时无法回收");
+            return Math.max(0, before - AppStorage.bytes(folder));
+        } catch (android.system.ErrnoException error) { throw new IOException("无法保存压缩存档", error); }
+        finally { temporary.delete(); }
+    }
+    long compressExisting() throws IOException {
+        Set<File> folders = new LinkedHashSet<>();
+        for (int slot = AUTO; slot <= QUICK; slot++) {
+            File saved = folder(slot);
+            if (saved != null) folders.add(saved);
+        }
+        long removed = 0;
+        for (File folder : folders) removed += compressMachine(folder);
+        return removed;
+    }
+    long uncompressedBytes() {
+        Set<File> folders = new HashSet<>();
+        try {
+            for (int slot = AUTO; slot <= QUICK; slot++) {
+                File saved = folder(slot);
+                if (saved != null) folders.add(saved);
+            }
+        } catch (IOException damaged) { return 0; }
+        long result = 0;
+        for (File folder : folders) result += new File(folder, "machine.bin").length();
+        return result;
+    }
+    List<File> temporaryFiles() {
+        File[] files = root.listFiles(file -> (file.isDirectory() && file.getName().matches("load-[0-9a-f-]{36}"))
+                || (file.isFile() && file.getName().matches("pack-[0-9-]+\\.pending")));
+        return files == null ? Collections.emptyList() : Arrays.asList(files);
     }
     void remove(int slot) throws IOException {
         File folder;
@@ -156,8 +234,8 @@ final class StateSlots {
         for (File folder : unused()) try { clean(folder); } catch (IOException ignored) { }
     }
     private void clean(File folder) throws IOException {
-        if (!folder.getCanonicalFile().getParentFile().equals(root.getCanonicalFile()) || !folder.getName().matches("[0-9a-f-]{36}")) throw new IOException("存档清理范围无效");
-        for (String name:new String[]{"machine.bin","host.bin","midi.bin"}) new File(folder,name).delete();
+        if (!folder.getCanonicalFile().getParentFile().equals(root.getCanonicalFile()) || !folder.getName().matches("(?:load-)?[0-9a-f-]{36}")) throw new IOException("存档清理范围无效");
+        for (String name:new String[]{"machine.bin","machine.bin.gz","host.bin","midi.bin"}) new File(folder,name).delete();
         folder.delete();
     }
     static String translate(String message) {

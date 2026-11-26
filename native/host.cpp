@@ -15,6 +15,7 @@
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include "memory_editor.h"
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -62,9 +63,9 @@ bool midiReceived=false, midiAudible=false;
 constexpr size_t audioCapacity = 32768;
 std::array<int16_t, audioCapacity * 2> audioBuffer{};
 std::atomic<uint64_t> audioRead{0}, audioWrite{0};
-struct Command { int type, a = 0, b = 0, c = 0; std::string path; std::shared_ptr<std::promise<std::string>> result; };
+struct Command { int type, a = 0, b = 0, c = 0; std::string path; std::shared_ptr<std::promise<std::string>> result; std::vector<int64_t> numbers; };
 std::deque<Command> commands;
-enum { Key, Mouse, Mount, Flush, Reset, Pause, Resume, ReleaseKeys, ReopenAudio, SaveState, LoadState };
+enum { Key, Mouse, Mount, Flush, Reset, Pause, Resume, ReleaseKeys, ReopenAudio, SaveState, LoadState, MemoryEdit };
 
 void message(const char* text) {
     if (!text) return;
@@ -230,6 +231,14 @@ void run(int platform, std::string directory, std::string disk, std::string seco
     std::string initialFloppyA = hardDiskPath.empty() ? disk : "";
     std::string initialFloppyB = secondDisk;
     MachineConfig configuration;
+    MemoryEditor editor([&] {
+        if (!core || !core->memory) return std::vector<NecMemoryRegion>{};
+        size_t count = core->memory(nullptr, 0);
+        if (count > 1024) throw std::runtime_error("内存区域数量无效");
+        std::vector<NecMemoryRegion> regions(count);
+        if (count && core->memory(regions.data(), count) != count) throw std::runtime_error("内存区域已改变，请重新打开修改器");
+        return regions;
+    });
     auto requestEdge = [](std::deque<bool>& edges, bool current, bool requested) {
         if ((edges.empty() ? current : edges.back()) != requested) edges.push_back(requested);
     };
@@ -418,6 +427,7 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                 }
                 case Flush: message(core->flush() ? "Disk changes flushed" : "Disk write failed"); break;
                 case Reset:
+                    editor.invalidate();
                     releaseKeys(); midiSynth.reset(); core->reset();
                     lastMouseReads = core->mouseReads ? core->mouseReads() : 0;
                     guestMouseActive.store(false); message("Reset"); break;
@@ -436,6 +446,7 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                         else if (command.path.compare(0,directory.size()+8,directory+"/states/")!=0 || command.path.find("..")!=std::string::npos) result="Invalid state slot path";
                         else if (command.type==SaveState) { if (!saveSession(command.path)) result="State save failed; previous slot preserved"; }
                         else {
+                            editor.invalidate();
                             result=restoreSession(command.path);
                             lastMouseReads = core->mouseReads ? core->mouseReads() : 0;
                             guestMouseActive.store(false);
@@ -444,6 +455,14 @@ void run(int platform, std::string directory, std::string disk, std::string seco
                     if (command.result) command.result->set_value(result);
                     message(result.empty() ? (command.type==SaveState ? "State saved" : "State loaded") : result.c_str());
                     next=std::chrono::steady_clock::now(); break;
+                }
+                case MemoryEdit: {
+                    std::string result;
+                    if (!paused.load() && command.a != 0 && command.a != 6 && command.a != 7)
+                        result = "{\"error\":\"请先暂停游戏再搜索或修改数值\"}";
+                    else result = editor.command(command.a, command.numbers);
+                    if (command.result) command.result->set_value(std::move(result));
+                    break;
                 }
                 }
             }
@@ -472,7 +491,9 @@ void run(int platform, std::string directory, std::string disk, std::string seco
             }
             core->mouse(motionX, motionY, buttons);
             motionX = motionY = 0;
+            editor.tick();
             core->frame();
+            editor.tick();
             if (core->mouseReads) {
                 unsigned reads = core->mouseReads();
                 if (reads != lastMouseReads) guestMouseActive.store(true);
@@ -553,6 +574,27 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_state(JNIEnv* env
     return env->NewStringUTF(future.get().c_str());
 }
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_reset(JNIEnv*, jclass) { enqueue({Reset}); }
+extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_memory(JNIEnv* env, jclass, jint action, jlongArray arguments) {
+    std::vector<int64_t> numbers;
+    jsize count = arguments ? env->GetArrayLength(arguments) : 0;
+    if (count > 512) return env->NewStringUTF("{\"error\":\"修改器参数过多\"}");
+    if (count) {
+        std::vector<jlong> data(size_t(count), 0);
+        env->GetLongArrayRegion(arguments, 0, count, data.data());
+        if (env->ExceptionCheck()) return nullptr;
+        numbers.assign(data.begin(), data.end());
+    }
+    auto result = std::make_shared<std::promise<std::string>>();
+    auto future = result->get_future();
+    {
+        std::lock_guard<std::mutex> lock(commandMutex);
+        if (!workerRunning.load() || stopping.load()) return env->NewStringUTF("{\"error\":\"游戏已停止\"}");
+        commands.push_back({MemoryEdit,action,0,0,{},result,std::move(numbers)});
+    }
+    wake.notify_one();
+    try { return env->NewStringUTF(future.get().c_str()); }
+    catch (...) { return env->NewStringUTF("{\"error\":\"游戏已停止\"}"); }
+}
 extern "C" JNIEXPORT void JNICALL Java_org_necmobile_Native_releaseKeys(JNIEnv*, jclass) { enqueue({ReleaseKeys}); }
 extern "C" JNIEXPORT jstring JNICALL Java_org_necmobile_Native_disk(JNIEnv* env, jclass, jint drive) {
     std::lock_guard<std::mutex> lock(statusMutex);

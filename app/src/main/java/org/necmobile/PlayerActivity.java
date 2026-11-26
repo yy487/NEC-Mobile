@@ -62,6 +62,7 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     private AudioFocusRequest audioFocus;
     private boolean focusGranted, appliedPause = true;
     private boolean stateBusy;
+    private MemoryEditorUi memoryEditor;
     private boolean startupReported, startupFailed;
     private boolean resumeLoading, autoSaving, autoPending, everRunning;
     private String displayAspect;
@@ -510,11 +511,11 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
     }
     private void menu() {
         long elapsed = playTime.elapsed(SystemClock.elapsedRealtime());
-        dialog().setTitle(gameName + "\n本次 " + PlayTime.format(elapsed) + " · 累计 " + PlayTime.format(previousPlayTime + elapsed)).setItems(new String[]{"返回游戏", "即时存档 / 读档", "更换 / 取出磁盘", userPaused || !focusGranted ? "继续运行" : "暂停", "屏幕方向", "操作方式 / 鼠标", "本游戏音源设置", "更多设置", "退出游戏"}, (dialog, index) -> {
+        dialog().setTitle(gameName + "\n本次 " + PlayTime.format(elapsed) + " · 累计 " + PlayTime.format(previousPlayTime + elapsed)).setItems(new String[]{"返回游戏", "即时存档 / 读档", "数值修改器", "更换 / 取出磁盘", userPaused || !focusGranted ? "继续运行" : "暂停", "屏幕方向", "操作方式 / 鼠标", "本游戏音源设置", "更多设置", "退出游戏"}, (dialog, index) -> {
             if (index == 1) states();
-            if (index == 2) disks();
-            if (index == 3) { userPaused = !(userPaused || !focusGranted); if (!userPaused && !focusGranted) requestFocus(); applyPause(); }
-            if (index == 4) {
+            if (index == 3) disks();
+            if (index == 4) { userPaused = !(userPaused || !focusGranted); if (!userPaused && !focusGranted) requestFocus(); applyPause(); }
+            if (index == 5) {
                 dialog().setTitle("屏幕方向")
                         .setSingleChoiceItems(new String[]{"自动旋转", "固定横屏", "固定竖屏"}, orientationMode, (picker, choice) -> {
                             orientationMode = choice;
@@ -522,9 +523,9 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                             applyOrientation(); picker.dismiss();
                         }).setNegativeButton("取消", null).show();
             }
-            if (index == 5) inputSettings();
-            if (index == 6) soundSettings();
-            if (index == 7) dialog().setTitle("更多设置")
+            if (index == 6) inputSettings();
+            if (index == 7) soundSettings();
+            if (index == 8) dialog().setTitle("更多设置")
                     .setItems(new String[]{"提交磁盘写入", "复位机器", "将当前画面设为封面", "恢复声音输出", "画面比例", "实际音频输出"}, (settings, which) -> {
                         if (which == 0) Native.flush();
                         else if (which == 2) captureCover();
@@ -534,7 +535,11 @@ public final class PlayerActivity extends Activity implements SurfaceHolder.Call
                         else dialog().setTitle("复位机器？").setMessage("尚未在游戏内保存的进度会丢失。")
                                 .setPositiveButton("复位", (a, b) -> { sessionRevision++; Native.reset(); }).setNegativeButton("取消", null).show();
                     }).setNegativeButton("关闭", null).show();
-            if (index == 8) confirmExit();
+            if (index == 2) {
+                if (memoryEditor==null) memoryEditor=new MemoryEditorUi(this,this::dialog,stateIo,new java.io.File(getIntent().getStringExtra("directory")),()->sessionRevision++);
+                memoryEditor.open();
+            }
+            if (index == 9) confirmExit();
         }).show();
     }
     private StateSlots stateSlots() { return new StateSlots(new java.io.File(getIntent().getStringExtra("directory"))); }

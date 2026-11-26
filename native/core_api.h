@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include "memory_region.h"
 
 struct NecHost {
     void (*video)(const uint32_t* rgba, unsigned width, unsigned height);
@@ -29,6 +30,7 @@ struct NecCore {
     const char* (*diskPath)(int drive);
     // Complete guest mouse transactions, used for suggestions rather than input routing.
     unsigned (*mouseReads)();
+    size_t (*memory)(NecMemoryRegion* regions, size_t capacity);
 };
 
 extern "C" __attribute__((visibility("default"))) const NecCore* nec_core();

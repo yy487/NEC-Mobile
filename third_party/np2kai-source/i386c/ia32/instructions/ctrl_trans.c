@@ -29,6 +29,9 @@
 #include "ia32/ctrlxfer.h"
 
 #include "ctrl_trans.h"
+#if defined(__LIBRETRO__)
+#include <font/font.h>
+#endif
 
 #if defined(ENABLE_TRAP)
 #include "trap/inttrap.h"
@@ -1349,6 +1352,9 @@ INT1(void)
 void
 INT3(void)
 {
+#if defined(__LIBRETRO__)
+	if (font_cg_trap()) return;
+#endif
 #if defined(SUPPORT_IA32_HAXM)
 #if defined(USE_CUSTOM_HOOKINST)
 	if(bioshookinfo.hookinst == 0xCC){

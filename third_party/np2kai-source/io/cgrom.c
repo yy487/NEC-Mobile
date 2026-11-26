@@ -30,7 +30,7 @@ static void cgwindowset(CGROM cr) {
 				cgwindow.writable |= 1;
 				high += cr->lr;
 			}
-			else if ((code >= 0x09) && (code < 0x0c)) {				// ver0.78
+			else if (font_cg_halfwidth(cr->code)) {
 				if (cr->lr) {
 					high = low;
 				}
@@ -65,6 +65,7 @@ static void IOOUTCALL cgrom_oa1(UINT port, REG8 dat) {
 	hf_count = 0;
 	cr = &cgrom;
 	cr->code = (dat << 8) | (cr->code & 0xff);
+	font_cg_probe();
 //#if defined(SUPPORT_TEXTHOOK)
 //	if(np2cfg.usetexthook){
 //		UINT16 SJis;
@@ -155,12 +156,10 @@ static REG8 IOINPCALL cgrom_ia9(UINT port) {
 
 	CGROM	cr;
 const UINT8	*ptr;
-	int		type;
 
 	cr = &cgrom;
 	ptr = fontrom;
-	type = cr->code & 0x00ff;
-	if ((type >= 0x09) && (type < 0x0c)) {							// ver0.78
+	if (font_cg_halfwidth(cr->code)) {
 		if (!cr->lr) {
 			if(hf_codeul && hf_count == 0) {
 				hook_fontrom((cr->code & 0x7f7f) << 4);

@@ -13,6 +13,7 @@ final class Native {
     static native void audioChanged();
     static native boolean checkSoundFont(String path);
     static native String state(String folder, boolean load);
+    static native String memory(int action, long[] arguments);
     static native void reset();
     static native void releaseKeys();
     static native String disk(int drive);

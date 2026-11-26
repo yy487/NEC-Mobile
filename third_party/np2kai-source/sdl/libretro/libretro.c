@@ -813,6 +813,32 @@ void updateInput(){
   }
 }
 
+#include "../../../../native/memory_region.h"
+
+RETRO_API size_t necmobile_memory_regions(NecMemoryRegion* regions, size_t capacity) {
+   size_t count = 1;
+   size_t low = CPU_EXTMEM ? (CPU_EXTMEMSIZE < 0xe00000 ? CPU_EXTMEMSIZE : 0xe00000) : 0;
+   size_t high = CPU_EXTMEM && CPU_EXTMEMSIZE > 0xf00000 ? CPU_EXTMEMSIZE - 0xf00000 : 0;
+   if (low) count++;
+   if (high) count++;
+   if (!regions || capacity < count) return count;
+   memset(regions, 0, count * sizeof(*regions));
+   regions[0].id = 0; regions[0].size = 0xa0000; regions[0].data = mem;
+   strcpy(regions[0].name, "PC-98 Main RAM");
+   count = 1;
+   if (low) {
+      regions[count].id = 1; regions[count].address = 0x100000;
+      regions[count].size = low; regions[count].data = CPU_EXTMEM;
+      strcpy(regions[count++].name, "PC-98 Extended RAM");
+   }
+   if (high) {
+      regions[count].id = 2; regions[count].address = 0x1000000;
+      regions[count].size = high; regions[count].data = CPU_EXTMEM + 0xf00000;
+      strcpy(regions[count++].name, "PC-98 Extended RAM 16M+");
+   }
+   return count;
+}
+
 void *retro_get_memory_data(unsigned type)
 {
    if ( type == RETRO_MEMORY_SYSTEM_RAM )
